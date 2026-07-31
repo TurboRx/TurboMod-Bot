@@ -30,6 +30,20 @@ Devvit.addTrigger({
 
     console.log(`[TurboMod] Processing PostSubmit for post ${post.id} by ${username}`);
 
+    // Moderator Exemption: Skip filters & rate limit if post author is a subreddit moderator
+    if (context.subredditName && username !== 'unknown_user') {
+      try {
+        const mods = await context.reddit.getModerators({ subredditName: context.subredditName }).all();
+        const isMod = mods.some((m) => m.username.toLowerCase() === username.toLowerCase());
+        if (isMod) {
+          console.log(`[TurboMod] User ${username} is a moderator. Bypassing rate limit and filters.`);
+          return;
+        }
+      } catch (err) {
+        console.error(`[TurboMod] Error checking moderator status for ${username}:`, err);
+      }
+    }
+
     // 1. Rate Limit Check: 2 posts / 3h ('turbomod:rate:{userId}')
     if (context.redis) {
       const rateLimitResult = await checkAndIncrementRateLimit(
@@ -121,13 +135,24 @@ Devvit.addMenuItem({
       const post = await context.reddit.getPostById(postId);
       await post.lock();
 
-      // 2. Fetch and remove all comments on the post
+      // 2. Fetch all comments on the post
       const comments = await post.comments.all();
       let commentsRemoved = 0;
 
-      for (const comment of comments) {
-        await comment.remove();
-        commentsRemoved++;
+      // Batch removal (chunks of 15) to prevent execution timeout on large threads
+      const CHUNK_SIZE = 15;
+      for (let i = 0; i < comments.length; i += CHUNK_SIZE) {
+        const chunk = comments.slice(i, i + CHUNK_SIZE);
+        await Promise.all(
+          chunk.map(async (comment) => {
+            try {
+              await comment.remove();
+              commentsRemoved++;
+            } catch (err) {
+              console.error(`[TurboMod] Failed to remove comment ${comment.id}:`, err);
+            }
+          })
+        );
       }
 
       // 3. Log to Redis Mod Log
