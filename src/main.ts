@@ -3,16 +3,11 @@ import { evaluatePost, DEFAULT_CONFIG } from './filters.js';
 import { checkAndIncrementRateLimit, addModLogEntry, getModLogs, isModeratorCached } from './redis.js';
 import { ModerationRuleConfig } from './types.js';
 
-// Configure Devvit capabilities
 Devvit.configure({
   redditAPI: true,
   redis: true,
 });
 
-/**
- * Subreddit Settings Panel
- * Allows moderators to configure thresholds dynamically via Reddit App Settings.
- */
 Devvit.addSettings([
   {
     type: 'number',
@@ -46,9 +41,6 @@ Devvit.addSettings([
   },
 ]);
 
-/**
- * Helper to fetch effective moderation configuration from Devvit settings with NaN safeguards.
- */
 async function getEffectiveConfig(context: any): Promise<ModerationRuleConfig> {
   try {
     const settings = await context.settings.getAll();
@@ -72,9 +64,6 @@ async function getEffectiveConfig(context: any): Promise<ModerationRuleConfig> {
   }
 }
 
-/**
- * Posts a stickied moderator removal notice on removed posts.
- */
 async function postStickyRemovalNotice(
   context: any,
   postId: string,
@@ -92,10 +81,6 @@ async function postStickyRemovalNotice(
   }
 }
 
-/**
- * Trigger: PostSubmit
- * Automatically moderates newly submitted posts based on regex filters, account age/karma, and rate limits.
- */
 Devvit.addTrigger({
   event: 'PostSubmit',
   onEvent: async (event, context) => {
@@ -114,7 +99,6 @@ Devvit.addTrigger({
 
     console.log(`[TurboMod] Processing PostSubmit for post ${post.id} by ${username}`);
 
-    // Moderator Exemption: Skip filters & rate limit if post author is a subreddit moderator
     if (context.subredditName && username !== 'unknown_user') {
       try {
         const isMod = context.redis
@@ -130,10 +114,8 @@ Devvit.addTrigger({
       }
     }
 
-    // Fetch dynamic subreddit configuration settings
     const config = await getEffectiveConfig(context);
 
-    // 1. Rate Limit Check: X posts per Y hours ('turbomod:rate:{userId}')
     if (context.redis) {
       const rateLimitResult = await checkAndIncrementRateLimit(
         context.redis,
@@ -146,17 +128,14 @@ Devvit.addTrigger({
         const reason = `Exceeded post rate limit (${rateLimitResult.currentCount}/${rateLimitResult.maxAllowed} posts in ${config.rateLimitWindowSeconds / 3600} hours)`;
         console.warn(`[TurboMod] Rate limit exceeded for user ${username}: ${reason}`);
 
-        // Post sticky removal notice if enabled
         if (config.enableStickyRemovalComment) {
           await postStickyRemovalNotice(context, post.id, reason);
         }
 
-        // Remove post due to rate limit violation
         if (context.reddit) {
           await context.reddit.remove(post.id, false);
         }
 
-        // Add Mod Log entry
         await addModLogEntry(context.redis, {
           action: 'RATE_LIMIT_EXCEEDED',
           targetId: post.id,
@@ -168,7 +147,6 @@ Devvit.addTrigger({
       }
     }
 
-    // 2. Filter checks (Regex shorteners & Karma/Age checks)
     const authorKarma = (author.linkKarma || 0) + (author.commentKarma || 0);
     const authorCreatedMs = author.createdAt ? new Date(author.createdAt).getTime() : Date.now();
     const authorCreatedUtc = !isNaN(authorCreatedMs) ? Math.floor(authorCreatedMs / 1000) : Math.floor(Date.now() / 1000);
@@ -185,18 +163,15 @@ Devvit.addTrigger({
       const reason = filterResult.reason || 'Failed content/author moderation filters';
       console.warn(`[TurboMod] Post ${post.id} failed filter: ${reason}`);
 
-      // Post sticky removal notice if enabled
       if (config.enableStickyRemovalComment) {
         await postStickyRemovalNotice(context, post.id, reason);
       }
 
-      // Remove post as spam/mod action
       if (context.reddit) {
         const isSpam = filterResult.action === 'spam';
         await context.reddit.remove(post.id, isSpam);
       }
 
-      // Log moderation action to Redis
       if (context.redis) {
         await addModLogEntry(context.redis, {
           action: filterResult.action === 'spam' ? 'SPAM_FILTERED' : 'POST_REMOVED',
@@ -209,10 +184,6 @@ Devvit.addTrigger({
   },
 });
 
-/**
- * Mod Menu Action: 'TurboMod: Nuke & Lock Thread'
- * Allows moderators to instantly lock a post and remove all comments in the thread.
- */
 Devvit.addMenuItem({
   label: 'TurboMod: Nuke & Lock Thread',
   location: 'post',
@@ -229,7 +200,6 @@ Devvit.addMenuItem({
     try {
       context.ui.showToast('TurboMod: Nuking and locking thread...');
 
-      // 1. Fetch Post & Lock Thread
       const post = await context.reddit.getPostById(postId);
       if (!post) {
         context.ui.showToast('Error: Post not found or deleted.');
@@ -238,11 +208,9 @@ Devvit.addMenuItem({
 
       await post.lock();
 
-      // 2. Fetch all comments on the post
       const comments = await post.comments.all();
       let commentsRemoved = 0;
 
-      // Batch removal (chunks of 15) to prevent execution timeout on large threads
       const CHUNK_SIZE = 15;
       for (let i = 0; i < comments.length; i += CHUNK_SIZE) {
         const chunk = comments.slice(i, i + CHUNK_SIZE);
@@ -258,7 +226,6 @@ Devvit.addMenuItem({
         );
       }
 
-      // 3. Log to Redis Mod Log
       if (context.redis) {
         await addModLogEntry(context.redis, {
           action: 'THREAD_NUKED',
@@ -277,10 +244,6 @@ Devvit.addMenuItem({
   },
 });
 
-/**
- * Mod Menu Action: 'TurboMod: View Recent Mod Logs'
- * Displays a summary toast of recent TurboMod automated and manual actions for moderators.
- */
 Devvit.addMenuItem({
   label: 'TurboMod: View Recent Mod Logs',
   location: 'subreddit',

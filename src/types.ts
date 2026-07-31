@@ -1,7 +1,3 @@
-/**
- * TurboMod Types Definition
- */
-
 export interface FilterResult {
   passed: boolean;
   reason?: string;
