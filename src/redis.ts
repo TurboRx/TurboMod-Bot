@@ -5,6 +5,7 @@ const MOD_LOG_KEY = 'turbomod:modlog';
 const RATE_LIMIT_PREFIX = 'turbomod:rate:';
 const DEFAULT_WINDOW_SECONDS = 10800; // 3 hours
 const DEFAULT_MAX_POSTS = 2; // 2 posts per 3 hours
+const MAX_LOG_ENTRIES = 100; // Maximum log entries retained to optimize Redis memory
 
 /**
  * Performs rate-limiting check and updates post count in Redis.
@@ -39,6 +40,7 @@ export async function checkAndIncrementRateLimit(
 
 /**
  * Logs a moderation action into Redis list 'turbomod:modlog'.
+ * Automatically trims log list to MAX_LOG_ENTRIES (100) per Reddit Developer Platform best practices.
  */
 export async function addModLogEntry(
   redis: RedisClient,
@@ -52,6 +54,13 @@ export async function addModLogEntry(
 
   const serialized = JSON.stringify(fullEntry);
   await redis.lPush(MOD_LOG_KEY, [serialized]);
+  
+  // Trim Redis list to maintain memory safety
+  try {
+    await redis.lTrim(MOD_LOG_KEY, 0, MAX_LOG_ENTRIES - 1);
+  } catch (err) {
+    console.error('[TurboMod] Non-critical error trimming Redis log list:', err);
+  }
 
   return fullEntry;
 }
