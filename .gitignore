@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.devvit/
+.config/
+drive/
+sample_data/
+.env*
+*.log

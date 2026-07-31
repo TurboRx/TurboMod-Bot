@@ -1,0 +1,4 @@
+name: turbomod
+version: 0.0.1
+permissions:
+  redis: true
