@@ -1,5 +1,5 @@
 {
-  "name": "turbomod",
+  "name": "turbomod-bot",
   "version": "0.0.1",
   "description": "Production-ready TurboMod Reddit Devvit app for automated moderation and rate-limiting",
   "main": "src/main.ts",
@@ -13,6 +13,7 @@
     "@devvit/public-api": "^0.13.10"
   },
   "devDependencies": {
+    "@devvit/cli": "^0.13.10",
     "@types/node": "^26.1.2",
     "typescript": "^7.0.2"
   },

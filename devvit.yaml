@@ -1,4 +1,4 @@
-name: turbomod
+name: turbomod-bot
 version: 0.0.1
 permissions:
   redis: true
