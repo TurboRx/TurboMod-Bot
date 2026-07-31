@@ -68,12 +68,18 @@ export async function addModLogEntry(
     timestamp: Date.now(),
   };
 
-  await redis.lPush(MOD_LOG_KEY, [JSON.stringify(fullEntry)]);
+  await redis.zAdd(MOD_LOG_KEY, {
+    member: JSON.stringify(fullEntry),
+    score: fullEntry.timestamp,
+  });
 
   try {
-    await redis.lTrim(MOD_LOG_KEY, 0, MAX_LOG_ENTRIES - 1);
+    const total = await redis.zCard(MOD_LOG_KEY);
+    if (total > MAX_LOG_ENTRIES) {
+      await redis.zRemRangeByRank(MOD_LOG_KEY, 0, total - MAX_LOG_ENTRIES - 1);
+    }
   } catch (err) {
-    console.error('[TurboMod] Error trimming Redis log list:', err);
+    console.error('[TurboMod] Error trimming Redis log set:', err);
   }
 
   return fullEntry;
@@ -84,18 +90,23 @@ export async function getModLogs(
   limit: number = 50
 ): Promise<ModLogEntry[]> {
   try {
-    const rawEntries = await redis.lRange(MOD_LOG_KEY, 0, limit - 1);
+    const rawEntries = await redis.zRange(MOD_LOG_KEY, 0, limit - 1, {
+      by: 'rank',
+      reverse: true,
+    });
     return rawEntries
-      .map((raw) => {
+      .map((item: any) => {
         try {
-          return JSON.parse(raw) as ModLogEntry;
+          const str = typeof item === 'string' ? item : item.member;
+          return JSON.parse(str) as ModLogEntry;
         } catch {
           return null;
         }
       })
-      .filter((entry): entry is ModLogEntry => entry !== null);
+      .filter((entry: ModLogEntry | null): entry is ModLogEntry => entry !== null);
   } catch (error) {
     console.error('Error fetching mod logs from Redis:', error);
     return [];
   }
 }
+

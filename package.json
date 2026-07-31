@@ -5,13 +5,15 @@
   "main": "src/main.ts",
   "type": "module",
   "scripts": {
-    "build": "tsc --noEmit",
+    "build": "tsc",
+    "test": "tsc && node --test dist/*.test.js",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@devvit/public-api": "^0.13.10"
   },
   "devDependencies": {
+    "@types/node": "^26.1.2",
     "typescript": "^7.0.2"
   },
   "private": true

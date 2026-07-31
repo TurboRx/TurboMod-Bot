@@ -147,9 +147,17 @@ Devvit.addTrigger({
       }
     }
 
-    const authorKarma = (author.linkKarma || 0) + (author.commentKarma || 0);
-    const authorCreatedMs = author.createdAt ? new Date(author.createdAt).getTime() : Date.now();
-    const authorCreatedUtc = !isNaN(authorCreatedMs) ? Math.floor(authorCreatedMs / 1000) : Math.floor(Date.now() / 1000);
+    const authorObj = author as any;
+    const authorKarma =
+      typeof authorObj.karma === 'number'
+        ? authorObj.karma
+        : (authorObj.linkKarma || 0) + (authorObj.commentKarma || 0);
+    const authorCreatedMs = authorObj.createdAt
+      ? new Date(authorObj.createdAt).getTime()
+      : Date.now();
+    const authorCreatedUtc = !isNaN(authorCreatedMs)
+      ? Math.floor(authorCreatedMs / 1000)
+      : Math.floor(Date.now() / 1000);
 
     const filterResult = evaluatePost(
       postTitle,
