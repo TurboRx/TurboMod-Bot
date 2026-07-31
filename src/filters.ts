@@ -20,6 +20,7 @@ export const DEFAULT_CONFIG: ModerationRuleConfig = {
   minAccountAgeDays: 3,
   rateLimitMaxPosts: 2,
   rateLimitWindowSeconds: 10800, // 3 hours in seconds
+  enableStickyRemovalComment: true,
 };
 
 /**

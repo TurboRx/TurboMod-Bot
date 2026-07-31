@@ -13,6 +13,7 @@ export interface ModerationRuleConfig {
   minAccountAgeDays: number;
   rateLimitMaxPosts: number;
   rateLimitWindowSeconds: number;
+  enableStickyRemovalComment?: boolean;
 }
 
 export interface ModLogEntry {
