@@ -1,6 +1,6 @@
 import { Devvit } from '@devvit/public-api';
 import { evaluatePost, DEFAULT_CONFIG } from './filters.js';
-import { checkAndIncrementRateLimit, addModLogEntry, getModLogs } from './redis.js';
+import { checkAndIncrementRateLimit, addModLogEntry, getModLogs, isModeratorCached } from './redis.js';
 import { ModerationRuleConfig } from './types.js';
 
 // Configure Devvit capabilities
@@ -47,17 +47,22 @@ Devvit.addSettings([
 ]);
 
 /**
- * Helper to fetch effective moderation configuration from Devvit settings.
+ * Helper to fetch effective moderation configuration from Devvit settings with NaN safeguards.
  */
 async function getEffectiveConfig(context: any): Promise<ModerationRuleConfig> {
   try {
     const settings = await context.settings.getAll();
-    const windowHours = Number(settings.rateLimitWindowHours) || 3;
+    const parsedWindowHours = Number(settings.rateLimitWindowHours);
+    const windowHours = !isNaN(parsedWindowHours) && parsedWindowHours > 0 ? parsedWindowHours : 3;
+
+    const minKarma = Number(settings.minKarma);
+    const minAccountAgeDays = Number(settings.minAccountAgeDays);
+    const rateLimitMaxPosts = Number(settings.rateLimitMaxPosts);
 
     return {
-      minKarma: Number(settings.minKarma) ?? DEFAULT_CONFIG.minKarma,
-      minAccountAgeDays: Number(settings.minAccountAgeDays) ?? DEFAULT_CONFIG.minAccountAgeDays,
-      rateLimitMaxPosts: Number(settings.rateLimitMaxPosts) ?? DEFAULT_CONFIG.rateLimitMaxPosts,
+      minKarma: !isNaN(minKarma) ? minKarma : DEFAULT_CONFIG.minKarma,
+      minAccountAgeDays: !isNaN(minAccountAgeDays) ? minAccountAgeDays : DEFAULT_CONFIG.minAccountAgeDays,
+      rateLimitMaxPosts: !isNaN(rateLimitMaxPosts) && rateLimitMaxPosts > 0 ? rateLimitMaxPosts : DEFAULT_CONFIG.rateLimitMaxPosts,
       rateLimitWindowSeconds: windowHours * 3600,
       enableStickyRemovalComment: Boolean(settings.enableStickyRemovalComment ?? true),
     };
@@ -112,8 +117,10 @@ Devvit.addTrigger({
     // Moderator Exemption: Skip filters & rate limit if post author is a subreddit moderator
     if (context.subredditName && username !== 'unknown_user') {
       try {
-        const mods = await context.reddit.getModerators({ subredditName: context.subredditName }).all();
-        const isMod = mods.some((m) => m.username.toLowerCase() === username.toLowerCase());
+        const isMod = context.redis
+          ? await isModeratorCached(context.redis, context.reddit, context.subredditName, username)
+          : false;
+
         if (isMod) {
           console.log(`[TurboMod] User ${username} is a moderator. Bypassing rate limit and filters.`);
           return;
@@ -163,9 +170,8 @@ Devvit.addTrigger({
 
     // 2. Filter checks (Regex shorteners & Karma/Age checks)
     const authorKarma = (author.linkKarma || 0) + (author.commentKarma || 0);
-    const authorCreatedUtc = author.createdAt
-      ? Math.floor(new Date(author.createdAt).getTime() / 1000)
-      : Math.floor(Date.now() / 1000);
+    const authorCreatedMs = author.createdAt ? new Date(author.createdAt).getTime() : Date.now();
+    const authorCreatedUtc = !isNaN(authorCreatedMs) ? Math.floor(authorCreatedMs / 1000) : Math.floor(Date.now() / 1000);
 
     const filterResult = evaluatePost(
       postTitle,
@@ -225,6 +231,11 @@ Devvit.addMenuItem({
 
       // 1. Fetch Post & Lock Thread
       const post = await context.reddit.getPostById(postId);
+      if (!post) {
+        context.ui.showToast('Error: Post not found or deleted.');
+        return;
+      }
+
       await post.lock();
 
       // 2. Fetch all comments on the post

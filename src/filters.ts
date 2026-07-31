@@ -2,15 +2,16 @@ import { FilterResult, ModerationRuleConfig } from './types.js';
 
 /**
  * Regex pattern matching known URL shorteners commonly used in spam.
+ * Note: Omitted 'g' flag to avoid lastIndex state issues during test().
  */
-export const URL_SHORTENER_REGEX =
-  /(?:https?:\/\/)?(?:www\.)?(?:bit\.ly|tinyurl\.com|t\.co|goo\.gl|is\.gd|buff\.ly|ow\.ly|rebrand\.ly|rb\.gy|cutt\.ly|shorturl\.at|tiny\.cc)\/[a-zA-Z0-9_-]+/gi;
+export const URL_SHORTENER_PATTERN =
+  /(?:https?:\/\/)?(?:www\.)?(?:bit\.ly|tinyurl\.com|t\.co|goo\.gl|is\.gd|buff\.ly|ow\.ly|rebrand\.ly|rb\.gy|cutt\.ly|shorturl\.at|tiny\.cc)\/[a-zA-Z0-9_-]+/i;
 
 /**
  * Regex pattern matching common spam & scam keywords.
  */
-export const SPAM_KEYWORDS_REGEX =
-  /\b(?:free\s+crypto|telegram:\s*@|whatsapp:\s*\+|\+1\d{10}|dm\s+for\s+(?:info|pics|deals)|buy\s+followers|cheap\s+(?:followers|pv|vcc)|whatsapp\s+me|cashapp\s+flip)\b/gi;
+export const SPAM_KEYWORDS_PATTERN =
+  /\b(?:free\s+crypto|telegram:\s*@|whatsapp:\s*\+|\+1\d{10}|dm\s+for\s+(?:info|pics|deals)|buy\s+followers|cheap\s+(?:followers|pv|vcc)|whatsapp\s+me|cashapp\s+flip)\b/i;
 
 /**
  * Default moderation threshold configurations.
@@ -25,15 +26,15 @@ export const DEFAULT_CONFIG: ModerationRuleConfig = {
 
 /**
  * Checks content (title + body) for disallowed URL shorteners or spam patterns.
+ * Handles null/undefined content inputs gracefully.
  */
-export function checkSpamPatterns(title: string, body?: string): FilterResult {
-  const content = `${title} ${body || ''}`;
+export function checkSpamPatterns(title?: string, body?: string): FilterResult {
+  const content = `${title || ''} ${body || ''}`.trim();
+  if (!content) {
+    return { passed: true };
+  }
 
-  // Reset regex index state
-  URL_SHORTENER_REGEX.lastIndex = 0;
-  SPAM_KEYWORDS_REGEX.lastIndex = 0;
-
-  if (URL_SHORTENER_REGEX.test(content)) {
+  if (URL_SHORTENER_PATTERN.test(content)) {
     return {
       passed: false,
       reason: 'Post contains suspicious URL shortener links',
@@ -41,7 +42,7 @@ export function checkSpamPatterns(title: string, body?: string): FilterResult {
     };
   }
 
-  if (SPAM_KEYWORDS_REGEX.test(content)) {
+  if (SPAM_KEYWORDS_PATTERN.test(content)) {
     return {
       passed: false,
       reason: 'Post contains flagged spam keywords or contact patterns',
@@ -54,29 +55,36 @@ export function checkSpamPatterns(title: string, body?: string): FilterResult {
 
 /**
  * Verifies author karma and account age against minimum requirements.
+ * Includes NaN and zero-value date validation safeguards.
  */
 export function checkAccountEligibility(
   karma: number,
   createdUtc: number,
   config: ModerationRuleConfig = DEFAULT_CONFIG
 ): FilterResult {
-  const nowInSeconds = Math.floor(Date.now() / 1000);
-  const accountAgeDays = (nowInSeconds - createdUtc) / 86400;
+  const safeKarma = isNaN(karma) ? 0 : karma;
+  const safeConfigMinKarma = isNaN(config.minKarma) ? DEFAULT_CONFIG.minKarma : config.minKarma;
+  const safeConfigMinAge = isNaN(config.minAccountAgeDays) ? DEFAULT_CONFIG.minAccountAgeDays : config.minAccountAgeDays;
 
-  if (karma < config.minKarma) {
+  if (safeKarma < safeConfigMinKarma) {
     return {
       passed: false,
-      reason: `Account karma (${karma}) is below the required threshold of ${config.minKarma}`,
+      reason: `Account karma (${safeKarma}) is below required threshold of ${safeConfigMinKarma}`,
       action: 'remove',
     };
   }
 
-  if (accountAgeDays < config.minAccountAgeDays) {
-    return {
-      passed: false,
-      reason: `Account age (${accountAgeDays.toFixed(1)} days) is below minimum requirement of ${config.minAccountAgeDays} days`,
-      action: 'remove',
-    };
+  if (!isNaN(createdUtc) && createdUtc > 0) {
+    const nowInSeconds = Math.floor(Date.now() / 1000);
+    const accountAgeDays = Math.max(0, (nowInSeconds - createdUtc) / 86400);
+
+    if (accountAgeDays < safeConfigMinAge) {
+      return {
+        passed: false,
+        reason: `Account age (${accountAgeDays.toFixed(1)} days) is below minimum requirement of ${safeConfigMinAge} days`,
+        action: 'remove',
+      };
+    }
   }
 
   return { passed: true };
@@ -86,19 +94,17 @@ export function checkAccountEligibility(
  * Runs combined moderation filters on post content and author metadata.
  */
 export function evaluatePost(
-  title: string,
+  title: string | undefined,
   body: string | undefined,
   authorKarma: number,
   authorCreatedUtc: number,
   config: ModerationRuleConfig = DEFAULT_CONFIG
 ): FilterResult {
-  // Check spam regex shorteners first
   const spamCheck = checkSpamPatterns(title, body);
   if (!spamCheck.passed) {
     return spamCheck;
   }
 
-  // Check account age & karma
   const ageKarmaCheck = checkAccountEligibility(authorKarma, authorCreatedUtc, config);
   if (!ageKarmaCheck.passed) {
     return ageKarmaCheck;
