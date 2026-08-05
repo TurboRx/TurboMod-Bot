@@ -35,6 +35,10 @@ export async function isModeratorCached(
   subredditName: string,
   username: string
 ): Promise<boolean> {
+  if (!subredditName || !username || username === 'unknown_user') {
+    return false;
+  }
+
   const cacheKey = `${MOD_CACHE_PREFIX}${subredditName.toLowerCase()}`;
 
   try {

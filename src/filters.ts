@@ -14,8 +14,16 @@ export const DEFAULT_CONFIG: ModerationRuleConfig = {
   enableStickyRemovalComment: true,
 };
 
+function normalizeText(text?: string): string {
+  if (!text) return '';
+  // Remove zero-width spaces, joiners, and non-printable control characters
+  return text.replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
+}
+
 export function checkSpamPatterns(title?: string, body?: string): FilterResult {
-  const content = `${title || ''} ${body || ''}`.trim();
+  const cleanTitle = normalizeText(title);
+  const cleanBody = normalizeText(body);
+  const content = `${cleanTitle} ${cleanBody}`.trim();
   if (!content) {
     return { passed: true };
   }

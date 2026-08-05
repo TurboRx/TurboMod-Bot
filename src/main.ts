@@ -138,7 +138,12 @@ Devvit.addTrigger({
         }
 
         if (context.reddit) {
-          await context.reddit.remove(post.id, false);
+          try {
+            const targetPostId = post.id.startsWith('t3_') ? post.id : `t3_${post.id}`;
+            await context.reddit.remove(targetPostId, false);
+          } catch (err) {
+            console.error(`[TurboMod] Error removing rate-limited post ${post.id}:`, err);
+          }
         }
 
         await addModLogEntry(context.redis, {
@@ -201,8 +206,13 @@ Devvit.addTrigger({
       }
 
       if (context.reddit) {
-        const isSpam = filterResult.action === 'spam';
-        await context.reddit.remove(post.id, isSpam);
+        try {
+          const targetPostId = post.id.startsWith('t3_') ? post.id : `t3_${post.id}`;
+          const isSpam = filterResult.action === 'spam';
+          await context.reddit.remove(targetPostId, isSpam);
+        } catch (err) {
+          console.error(`[TurboMod] Error removing filtered post ${post.id}:`, err);
+        }
       }
 
       if (context.redis) {
@@ -233,7 +243,8 @@ Devvit.addMenuItem({
     try {
       context.ui.showToast('TurboMod: Nuking and locking thread...');
 
-      const post = await context.reddit.getPostById(postId);
+      const targetPostId = postId.startsWith('t3_') ? postId : `t3_${postId}`;
+      const post = await context.reddit.getPostById(targetPostId);
       if (!post) {
         context.ui.showToast('Error: Post not found or deleted.');
         return;

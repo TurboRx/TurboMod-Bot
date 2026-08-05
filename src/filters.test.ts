@@ -22,6 +22,11 @@ test('Spam Filter - Spam Keywords', () => {
   assert.equal(result1.passed, false);
   assert.equal(result1.action, 'spam');
 
+  // Test zero-width space evasion
+  const resultEvade = checkSpamPatterns('Get F\u200BREE CRY\u200BPTO right now!', 'Telegram:\u200B@crypto_scam');
+  assert.equal(resultEvade.passed, false);
+  assert.equal(resultEvade.action, 'spam');
+
   const result2 = checkSpamPatterns('Looking for advice on buying a laptop', 'Any suggestions?');
   assert.equal(result2.passed, true);
 });
