@@ -70,14 +70,19 @@ async function postStickyRemovalNotice(
   reason: string
 ): Promise<void> {
   if (!context.reddit) return;
+  const targetId = postId.startsWith('t3_') ? postId : `t3_${postId}`;
   try {
+    console.log(`[TurboMod] Adding sticky removal comment on post ${targetId}`);
     const comment = await context.reddit.addComment({
-      id: postId,
+      id: targetId,
       text: `🤖 **TurboMod Automated Moderation Notice**\n\nYour post has been automatically removed.\n\n**Reason:** ${reason}\n\n*If you believe this action was taken in error, please contact the subreddit moderation team.*`,
     });
-    await comment.distinguish(true);
+    if (comment) {
+      await comment.distinguish(true);
+      console.log(`[TurboMod] Sticky removal comment ${comment.id} posted successfully.`);
+    }
   } catch (err) {
-    console.error(`[TurboMod] Failed to post sticky removal comment on ${postId}:`, err);
+    console.error(`[TurboMod] Failed to post sticky removal comment on ${targetId}:`, err);
   }
 }
 
@@ -147,17 +152,37 @@ Devvit.addTrigger({
       }
     }
 
+    let authorKarma = 0;
+    let authorCreatedUtc = Math.floor(Date.now() / 1000);
+
     const authorObj = author as any;
-    const authorKarma =
-      typeof authorObj.karma === 'number'
-        ? authorObj.karma
-        : (authorObj.linkKarma || 0) + (authorObj.commentKarma || 0);
-    const authorCreatedMs = authorObj.createdAt
-      ? new Date(authorObj.createdAt).getTime()
-      : Date.now();
-    const authorCreatedUtc = !isNaN(authorCreatedMs)
-      ? Math.floor(authorCreatedMs / 1000)
-      : Math.floor(Date.now() / 1000);
+    if (typeof authorObj.karma === 'number') {
+      authorKarma = authorObj.karma;
+    } else if (typeof authorObj.linkKarma === 'number' || typeof authorObj.commentKarma === 'number') {
+      authorKarma = (authorObj.linkKarma || 0) + (authorObj.commentKarma || 0);
+    }
+
+    if (authorObj.createdAt) {
+      const createdMs = new Date(authorObj.createdAt).getTime();
+      if (!isNaN(createdMs)) {
+        authorCreatedUtc = Math.floor(createdMs / 1000);
+      }
+    }
+
+    // Fetch full user profile if karma/createdAt is missing from event object
+    if (context.reddit && username && username !== 'unknown_user' && authorKarma === 0) {
+      try {
+        const fetchedUser = await context.reddit.getUserByUsername(username);
+        if (fetchedUser) {
+          authorKarma = (fetchedUser.linkKarma || 0) + (fetchedUser.commentKarma || 0);
+          if (fetchedUser.createdAt) {
+            authorCreatedUtc = Math.floor(new Date(fetchedUser.createdAt).getTime() / 1000);
+          }
+        }
+      } catch (err) {
+        console.error(`[TurboMod] Could not fetch user profile for ${username}:`, err);
+      }
+    }
 
     const filterResult = evaluatePost(
       postTitle,
