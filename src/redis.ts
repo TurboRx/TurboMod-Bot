@@ -57,7 +57,7 @@ export async function isModeratorCached(
         if (Array.isArray(parsed)) {
           modUsernames = parsed;
         }
-      } catch (e) {
+      } catch (_e) {
         // Fallback on JSON parse error
       }
     }

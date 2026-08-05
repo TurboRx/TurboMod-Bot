@@ -211,7 +211,7 @@ async function isApprovedUser(context: any, subredditName: string, username: str
   try {
     const approvedUsers = await context.reddit.getApprovedUsers({ subredditName, username: cleanUsername }).all();
     return approvedUsers.some((u: any) => (u.username || '').trim().toLowerCase().replace(/^u\//i, '') === cleanUsername);
-  } catch (err) {
+  } catch (_err) {
     return false;
   }
 }
