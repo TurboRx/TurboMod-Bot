@@ -24,21 +24,32 @@ export const DEFAULT_CONFIG: ModerationRuleConfig = {
 
 export function normalizeText(text?: string): string {
   if (!text) return '';
-  // Remove zero-width spaces, joiners, soft hyphens, and non-printable control characters
-  const unstripped = text.replace(/[\u200B-\u200D\uFEFF\u00AD]/g, '').trim();
-  // De-obfuscate spaces inside domain names (e.g. "b i t . l y" -> "bit.ly")
-  return unstripped.replace(/(?:([a-z0-9])\s+([a-z0-9]))/gi, '$1$2');
+  // 1. Remove zero-width spaces, joiners, soft hyphens, and non-printable control characters
+  let clean = text.replace(/[\u200B-\u200D\uFEFF\u00AD\u2060\u180E\u2000-\u200A]/g, '').trim();
+
+  // 2. De-obfuscate common dot obfuscations used in link shorteners (e.g., bit[.]ly, bit(dot)ly -> bit.ly)
+  clean = clean.replace(/\[\.\]|\(\.\)|\{.\}|\(dot\)|\[dot\]|\{dot\}|\s+dot\s+/gi, '.');
+
+  // 3. De-obfuscate spaces inside domain names (e.g. "b i t . l y" -> "bit.ly")
+  clean = clean.replace(/(?:([a-z0-9])\s+([a-z0-9]))/gi, '$1$2');
+
+  return clean;
 }
 
 export function checkSpamPatterns(title?: string, body?: string): FilterResult {
-  const cleanTitle = normalizeText(title);
-  const cleanBody = normalizeText(body);
-  const content = `${cleanTitle} ${cleanBody}`.trim();
-  if (!content) {
+  const rawTitle = title || '';
+  const rawBody = body || '';
+  const cleanTitle = normalizeText(rawTitle);
+  const cleanBody = normalizeText(rawBody);
+
+  const contentNormalized = `${cleanTitle} ${cleanBody}`.trim();
+  const contentRaw = `${rawTitle} ${rawBody}`.trim();
+
+  if (!contentNormalized && !contentRaw) {
     return { passed: true };
   }
 
-  if (URL_SHORTENER_PATTERN.test(content) || URL_SHORTENER_PATTERN.test(`${title || ''} ${body || ''}`)) {
+  if (URL_SHORTENER_PATTERN.test(contentNormalized) || URL_SHORTENER_PATTERN.test(contentRaw)) {
     return {
       passed: false,
       reason: 'Content contains suspicious URL shortener or redirect links',
@@ -46,7 +57,7 @@ export function checkSpamPatterns(title?: string, body?: string): FilterResult {
     };
   }
 
-  if (SPAM_KEYWORDS_PATTERN.test(content) || SPAM_KEYWORDS_PATTERN.test(`${title || ''} ${body || ''}`)) {
+  if (SPAM_KEYWORDS_PATTERN.test(contentNormalized) || SPAM_KEYWORDS_PATTERN.test(contentRaw)) {
     return {
       passed: false,
       reason: 'Content contains flagged spam keywords or contact patterns',
@@ -75,8 +86,10 @@ export function checkAccountEligibility(
   }
 
   if (!isNaN(createdUtc) && createdUtc > 0) {
+    // Handle timestamp if passed in milliseconds instead of seconds
+    const createdInSeconds = createdUtc > 1e11 ? Math.floor(createdUtc / 1000) : createdUtc;
     const nowInSeconds = Math.floor(Date.now() / 1000);
-    const accountAgeDays = Math.max(0, (nowInSeconds - createdUtc) / 86400);
+    const accountAgeDays = Math.max(0, (nowInSeconds - createdInSeconds) / 86400);
 
     if (accountAgeDays < safeConfigMinAge) {
       return {

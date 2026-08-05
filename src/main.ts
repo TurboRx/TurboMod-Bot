@@ -108,7 +108,7 @@ async function getEffectiveConfig(context: any): Promise<ModerationRuleConfig> {
     const rawExemptUsers = typeof settings.exemptUsernames === 'string' ? settings.exemptUsernames : '';
     const exemptUsernames = rawExemptUsers
       .split(',')
-      .map((s: string) => s.trim().toLowerCase())
+      .map((s: string) => s.trim().toLowerCase().replace(/^u\//i, ''))
       .filter((s: string) => s.length > 0);
 
     const rawExemptFlairs = typeof settings.exemptFlairs === 'string' ? settings.exemptFlairs : 'verified, proof, approved';
@@ -147,16 +147,17 @@ async function getEffectiveConfig(context: any): Promise<ModerationRuleConfig> {
 
 async function isApprovedUser(context: any, subredditName: string, username: string): Promise<boolean> {
   if (!context.reddit || !subredditName || !username) return false;
+  const cleanUsername = username.trim().toLowerCase().replace(/^u\//i, '');
   try {
-    const approvedUsers = await context.reddit.getApprovedUsers({ subredditName, username }).all();
-    return approvedUsers.some((u: any) => u.username.toLowerCase() === username.toLowerCase());
+    const approvedUsers = await context.reddit.getApprovedUsers({ subredditName, username: cleanUsername }).all();
+    return approvedUsers.some((u: any) => (u.username || '').trim().toLowerCase().replace(/^u\//i, '') === cleanUsername);
   } catch (err) {
     return false;
   }
 }
 
 async function postStickyRemovalNotice(context: any, itemId: string, reason: string): Promise<void> {
-  if (!context.reddit || !itemId.startsWith('t3_')) return;
+  if (!context.reddit || !itemId || !itemId.startsWith('t3_')) return;
   try {
     console.log(`[TurboMod] Adding sticky removal comment on post ${itemId}`);
     const comment = await context.reddit.addComment({
@@ -173,7 +174,7 @@ async function postStickyRemovalNotice(context: any, itemId: string, reason: str
 }
 
 async function lockItem(context: any, itemId: string): Promise<void> {
-  if (!context.reddit) return;
+  if (!context.reddit || !itemId) return;
   try {
     if (itemId.startsWith('t3_')) {
       const post = await context.reddit.getPostById(itemId);
@@ -206,10 +207,15 @@ interface ProcessContentOptions {
 
 async function processContent(options: ProcessContentOptions, context: any): Promise<void> {
   const { itemId, itemType, isEdit, title, body, author, flairText } = options;
-  const username = author.name || 'unknown_user';
-  const userId = author.id || username;
+  const rawUsername = author.name || 'unknown_user';
+  const username = rawUsername.trim().replace(/^u\//i, '');
+  const userId = (author.id || username).trim();
 
-  if (username === 'AutoModerator' || username === 'unknown_user' || username.endsWith('-ModTeam')) {
+  if (
+    username === 'unknown_user' ||
+    username.toLowerCase() === 'automoderator' ||
+    username.toLowerCase().endsWith('-modteam')
+  ) {
     return;
   }
 
@@ -266,7 +272,8 @@ async function processContent(options: ProcessContentOptions, context: any): Pro
     );
 
     if (!rateLimitResult.allowed) {
-      const reason = `Exceeded post rate limit (${rateLimitResult.currentCount}/${rateLimitResult.maxAllowed} posts in ${config.rateLimitWindowSeconds / 3600} hours)`;
+      const hoursStr = (config.rateLimitWindowSeconds / 3600).toFixed(1);
+      const reason = `Exceeded post rate limit (${rateLimitResult.currentCount}/${rateLimitResult.maxAllowed} posts in ${hoursStr} hours)`;
       console.warn(`[TurboMod] Rate limit exceeded for user u/${username}: ${reason}`);
 
       if (config.testMode) {
@@ -387,7 +394,6 @@ async function processContent(options: ProcessContentOptions, context: any): Pro
     if (effectiveAction === 'filter') {
       if (context.reddit) {
         try {
-          // Remove without marking as spam so it appears in modqueue for review
           await context.reddit.remove(itemId, false);
           if (config.lockContentOnRemoval) {
             await lockItem(context, itemId);
@@ -557,7 +563,7 @@ Devvit.addMenuItem({
   forUserType: 'moderator',
   onPress: async (event, context) => {
     const postId = event.targetId;
-    const moderatorName = context.username || 'Moderator';
+    const moderatorName = (context.username || 'Moderator').replace(/^u\//i, '');
 
     if (!postId) {
       context.ui.showToast('Error: Target post ID not found.');
@@ -576,29 +582,32 @@ Devvit.addMenuItem({
 
       await post.lock();
 
-      const comments = await post.comments.all();
       let commentsRemoved = 0;
-
-      const CHUNK_SIZE = 15;
-      for (let i = 0; i < comments.length; i += CHUNK_SIZE) {
-        const chunk = comments.slice(i, i + CHUNK_SIZE);
-        await Promise.all(
-          chunk.map(async (comment) => {
-            try {
-              await comment.remove();
-              commentsRemoved++;
-            } catch (err) {
-              console.error(`[TurboMod] Failed to remove comment ${comment.id}:`, err);
-            }
-          })
-        );
+      try {
+        const comments = await post.comments.all();
+        const CHUNK_SIZE = 15;
+        for (let i = 0; i < comments.length; i += CHUNK_SIZE) {
+          const chunk = comments.slice(i, i + CHUNK_SIZE);
+          await Promise.all(
+            chunk.map(async (comment) => {
+              try {
+                await comment.remove();
+                commentsRemoved++;
+              } catch (err) {
+                console.error(`[TurboMod] Failed to remove comment ${comment.id}:`, err);
+              }
+            })
+          );
+        }
+      } catch (commentErr) {
+        console.error('[TurboMod] Error fetching or purging comments:', commentErr);
       }
 
       if (context.redis) {
         await addModLogEntry(context.redis, {
           action: 'THREAD_NUKED',
           targetId: postId,
-          author: post.authorName || 'unknown',
+          author: (post.authorName || 'unknown').replace(/^u\//i, ''),
           moderator: moderatorName,
           reason: `Moderator u/${moderatorName} nuked ${commentsRemoved} comment(s) and locked thread.`,
         });
@@ -630,7 +639,7 @@ Devvit.addMenuItem({
       }
 
       const topLog = logs[0];
-      const timeAgo = Math.floor((Date.now() - topLog.timestamp) / 1000 / 60);
+      const timeAgo = Math.max(0, Math.floor((Date.now() - topLog.timestamp) / 1000 / 60));
 
       context.ui.showToast(
         `TurboMod Logs (${logs.length} total) | Latest (${timeAgo}m ago): [${topLog.action}] u/${topLog.author} - ${topLog.reason.substring(0, 45)}...`

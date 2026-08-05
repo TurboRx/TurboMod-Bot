@@ -4,6 +4,7 @@ import {
   checkSpamPatterns,
   checkAccountEligibility,
   evaluatePost,
+  normalizeText,
   DEFAULT_CONFIG,
 } from './filters.js';
 
@@ -12,6 +13,13 @@ test('Spam Filter - URL Shorteners & Obfuscation Evasion', () => {
   assert.equal(result1.passed, false);
   assert.equal(result1.action, 'remove');
   assert.match(result1.reason || '', /URL shortener/i);
+
+  // Test dot obfuscations (bit[.]ly, tinyurl(dot)com, linktr dot ee)
+  const resultObfuscated1 = checkSpamPatterns('Check my bio bit[.]ly/3xyz123', 'Click here!');
+  assert.equal(resultObfuscated1.passed, false);
+
+  const resultObfuscated2 = checkSpamPatterns('Check my bio tinyurl(dot)com/abc123', 'Click here!');
+  assert.equal(resultObfuscated2.passed, false);
 
   const resultLinktree = checkSpamPatterns('Check my bio linktr.ee/myprofile', 'Click here!');
   assert.equal(resultLinktree.passed, false);
@@ -37,7 +45,13 @@ test('Spam Filter - Spam Keywords & Soft Hyphens', () => {
   assert.equal(result2.passed, true);
 });
 
-test('Account Eligibility - Karma & Age Checks', () => {
+test('Text Normalization Utility', () => {
+  const input = 'bit[.]ly/3xyz\u200B123';
+  const clean = normalizeText(input);
+  assert.equal(clean, 'bit.ly/3xyz123');
+});
+
+test('Account Eligibility - Karma, Negative Karma & Age Checks', () => {
   const nowUtc = Math.floor(Date.now() / 1000);
   const tenDaysAgoUtc = nowUtc - 10 * 86400;
   const oneDayAgoUtc = nowUtc - 1 * 86400;
@@ -45,6 +59,10 @@ test('Account Eligibility - Karma & Age Checks', () => {
   // Passed case
   const passRes = checkAccountEligibility(100, tenDaysAgoUtc, DEFAULT_CONFIG);
   assert.equal(passRes.passed, true);
+
+  // Negative Karma
+  const negKarmaRes = checkAccountEligibility(-15, tenDaysAgoUtc, DEFAULT_CONFIG);
+  assert.equal(negKarmaRes.passed, false);
 
   // Low Karma
   const lowKarmaRes = checkAccountEligibility(2, tenDaysAgoUtc, DEFAULT_CONFIG);
@@ -55,6 +73,10 @@ test('Account Eligibility - Karma & Age Checks', () => {
   const youngAccountRes = checkAccountEligibility(50, oneDayAgoUtc, DEFAULT_CONFIG);
   assert.equal(youngAccountRes.passed, false);
   assert.match(youngAccountRes.reason || '', /Account age/i);
+
+  // Millisecond timestamp handling
+  const passMsRes = checkAccountEligibility(100, tenDaysAgoUtc * 1000, DEFAULT_CONFIG);
+  assert.equal(passMsRes.passed, true);
 });
 
 test('Overall Post Evaluation', () => {

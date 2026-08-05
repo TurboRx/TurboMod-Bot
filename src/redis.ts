@@ -14,18 +14,22 @@ export async function checkAndIncrementRateLimit(
   maxPosts: number = DEFAULT_MAX_POSTS,
   windowSeconds: number = DEFAULT_WINDOW_SECONDS
 ): Promise<RateLimitCheckResult> {
-  const key = `${RATE_LIMIT_PREFIX}${userId}`;
+  const cleanUserId = (userId || 'unknown').trim().toLowerCase().replace(/^u\//i, '');
+  const safeMaxPosts = isNaN(maxPosts) || maxPosts <= 0 ? DEFAULT_MAX_POSTS : maxPosts;
+  const safeWindowSeconds = isNaN(windowSeconds) || windowSeconds <= 0 ? DEFAULT_WINDOW_SECONDS : windowSeconds;
+
+  const key = `${RATE_LIMIT_PREFIX}${cleanUserId}`;
   const currentCount = await redis.incrBy(key, 1);
 
   if (currentCount === 1) {
-    await redis.expire(key, windowSeconds);
+    await redis.expire(key, safeWindowSeconds);
   }
 
   return {
-    allowed: currentCount <= maxPosts,
+    allowed: currentCount <= safeMaxPosts,
     currentCount,
-    maxAllowed: maxPosts,
-    ttlRemainingSeconds: windowSeconds,
+    maxAllowed: safeMaxPosts,
+    ttlRemainingSeconds: safeWindowSeconds,
   };
 }
 
@@ -39,23 +43,37 @@ export async function isModeratorCached(
     return false;
   }
 
-  const cacheKey = `${MOD_CACHE_PREFIX}${subredditName.toLowerCase()}`;
+  const cleanSubreddit = subredditName.trim().toLowerCase();
+  const cleanUsername = username.trim().toLowerCase().replace(/^u\//i, '');
+  const cacheKey = `${MOD_CACHE_PREFIX}${cleanSubreddit}`;
 
   try {
     const cachedModsJson = await redis.get(cacheKey);
     let modUsernames: string[] = [];
 
     if (cachedModsJson) {
-      modUsernames = JSON.parse(cachedModsJson);
-    } else if (reddit) {
-      const mods = await reddit.getModerators({ subredditName }).all();
-      modUsernames = mods.map((m: any) => (m.username || '').toLowerCase());
+      try {
+        const parsed = JSON.parse(cachedModsJson);
+        if (Array.isArray(parsed)) {
+          modUsernames = parsed;
+        }
+      } catch (e) {
+        // Fallback on JSON parse error
+      }
+    }
+
+    if (modUsernames.length === 0 && reddit) {
+      const mods = await reddit.getModerators({ subredditName: cleanSubreddit }).all();
+      modUsernames = mods
+        .map((m: any) => (m.username || '').trim().toLowerCase().replace(/^u\//i, ''))
+        .filter((u: string) => u.length > 0);
+
       await redis.set(cacheKey, JSON.stringify(modUsernames), {
         expiration: new Date(Date.now() + 3600 * 1000),
       });
     }
 
-    return modUsernames.includes(username.toLowerCase());
+    return modUsernames.includes(cleanUsername);
   } catch (err) {
     console.error('[TurboMod] Error in isModeratorCached:', err);
     return false;
@@ -94,7 +112,8 @@ export async function getModLogs(
   limit: number = 50
 ): Promise<ModLogEntry[]> {
   try {
-    const rawEntries = await redis.zRange(MOD_LOG_KEY, 0, limit - 1, {
+    const safeLimit = isNaN(limit) || limit <= 0 ? 50 : limit;
+    const rawEntries = await redis.zRange(MOD_LOG_KEY, 0, safeLimit - 1, {
       by: 'rank',
       reverse: true,
     });
@@ -113,4 +132,3 @@ export async function getModLogs(
     return [];
   }
 }
-
