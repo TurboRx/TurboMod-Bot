@@ -39,6 +39,35 @@ Devvit.addSettings([
     label: 'Post Sticky Explanation Comment on Post Removal',
     defaultValue: true,
   },
+  {
+    type: 'boolean',
+    name: 'testMode',
+    label: 'Test Mode (Dry Run - Log actions without removing/filtering posts)',
+    defaultValue: false,
+  },
+  {
+    type: 'select',
+    name: 'actionOnSpam',
+    label: 'Action on Spam / Filter Match',
+    options: [
+      { label: 'Remove Post (Default)', value: 'remove' },
+      { label: 'Report Post to Subreddit Mods', value: 'report' },
+      { label: 'Mark as Spam', value: 'spam' },
+    ],
+    defaultValue: ['remove'],
+  },
+  {
+    type: 'string',
+    name: 'exemptUsernames',
+    label: 'Exempt Usernames (comma-separated list)',
+    defaultValue: '',
+  },
+  {
+    type: 'string',
+    name: 'exemptFlairs',
+    label: 'Exempt User Flairs (comma-separated keywords, e.g. verified, proof)',
+    defaultValue: 'verified, proof, approved',
+  },
 ]);
 
 async function getEffectiveConfig(context: any): Promise<ModerationRuleConfig> {
@@ -51,12 +80,31 @@ async function getEffectiveConfig(context: any): Promise<ModerationRuleConfig> {
     const minAccountAgeDays = Number(settings.minAccountAgeDays);
     const rateLimitMaxPosts = Number(settings.rateLimitMaxPosts);
 
+    const rawExemptUsers = typeof settings.exemptUsernames === 'string' ? settings.exemptUsernames : '';
+    const exemptUsernames = rawExemptUsers
+      .split(',')
+      .map((s: string) => s.trim().toLowerCase())
+      .filter((s: string) => s.length > 0);
+
+    const rawExemptFlairs = typeof settings.exemptFlairs === 'string' ? settings.exemptFlairs : 'verified, proof, approved';
+    const exemptFlairs = rawExemptFlairs
+      .split(',')
+      .map((s: string) => s.trim().toLowerCase())
+      .filter((s: string) => s.length > 0);
+
+    const rawAction = Array.isArray(settings.actionOnSpam) ? settings.actionOnSpam[0] : settings.actionOnSpam;
+    const actionOnSpam = (['remove', 'report', 'spam'].includes(rawAction) ? rawAction : 'remove') as 'remove' | 'report' | 'spam';
+
     return {
       minKarma: !isNaN(minKarma) ? minKarma : DEFAULT_CONFIG.minKarma,
       minAccountAgeDays: !isNaN(minAccountAgeDays) ? minAccountAgeDays : DEFAULT_CONFIG.minAccountAgeDays,
       rateLimitMaxPosts: !isNaN(rateLimitMaxPosts) && rateLimitMaxPosts > 0 ? rateLimitMaxPosts : DEFAULT_CONFIG.rateLimitMaxPosts,
       rateLimitWindowSeconds: windowHours * 3600,
       enableStickyRemovalComment: Boolean(settings.enableStickyRemovalComment ?? true),
+      testMode: Boolean(settings.testMode ?? false),
+      actionOnSpam,
+      exemptUsernames,
+      exemptFlairs,
     };
   } catch (error) {
     console.error('[TurboMod] Failed to load settings, using defaults:', error);
@@ -121,6 +169,21 @@ Devvit.addTrigger({
 
     const config = await getEffectiveConfig(context);
 
+    // Custom exempt username check
+    if (config.exemptUsernames && config.exemptUsernames.includes(username.toLowerCase())) {
+      console.log(`[TurboMod] User ${username} is in custom exempt list. Bypassing.`);
+      return;
+    }
+
+    // User flair exemption check
+    const flairText = ((post as any).authorFlair?.text || (post as any).authorFlairText || '').toLowerCase();
+    if (flairText && config.exemptFlairs && config.exemptFlairs.length > 0) {
+      if (config.exemptFlairs.some((f) => flairText.includes(f))) {
+        console.log(`[TurboMod] User ${username} has exempt flair "${flairText}". Bypassing moderation.`);
+        return;
+      }
+    }
+
     if (context.redis) {
       const rateLimitResult = await checkAndIncrementRateLimit(
         context.redis,
@@ -132,6 +195,17 @@ Devvit.addTrigger({
       if (!rateLimitResult.allowed) {
         const reason = `Exceeded post rate limit (${rateLimitResult.currentCount}/${rateLimitResult.maxAllowed} posts in ${config.rateLimitWindowSeconds / 3600} hours)`;
         console.warn(`[TurboMod] Rate limit exceeded for user ${username}: ${reason}`);
+
+        if (config.testMode) {
+          console.log(`[TurboMod] [TEST MODE] Rate limit triggered for ${username}, skipping removal.`);
+          await addModLogEntry(context.redis, {
+            action: 'TEST_MODE_LOGGED',
+            targetId: post.id,
+            author: username,
+            reason: `[TEST MODE] ${reason}`,
+          });
+          return;
+        }
 
         if (config.enableStickyRemovalComment) {
           await postStickyRemovalNotice(context, post.id, reason);
@@ -201,6 +275,45 @@ Devvit.addTrigger({
       const reason = filterResult.reason || 'Failed content/author moderation filters';
       console.warn(`[TurboMod] Post ${post.id} failed filter: ${reason}`);
 
+      if (config.testMode) {
+        console.log(`[TurboMod] [TEST MODE] Post ${post.id} failed filter: ${reason}. Skipping removal.`);
+        if (context.redis) {
+          await addModLogEntry(context.redis, {
+            action: 'TEST_MODE_LOGGED',
+            targetId: post.id,
+            author: username,
+            reason: `[TEST MODE] ${reason}`,
+          });
+        }
+        return;
+      }
+
+      const effectiveAction = config.actionOnSpam || filterResult.action || 'remove';
+
+      if (effectiveAction === 'report') {
+        if (context.reddit) {
+          try {
+            const targetPostId = post.id.startsWith('t3_') ? post.id : `t3_${post.id}`;
+            const fetchedPost = await context.reddit.getPostById(targetPostId);
+            if (fetchedPost) {
+              await context.reddit.report(fetchedPost, { reason: `TurboMod: ${reason}` });
+            }
+          } catch (err) {
+            console.error(`[TurboMod] Error reporting post ${post.id}:`, err);
+          }
+        }
+
+        if (context.redis) {
+          await addModLogEntry(context.redis, {
+            action: 'POST_REPORTED',
+            targetId: post.id,
+            author: username,
+            reason,
+          });
+        }
+        return;
+      }
+
       if (config.enableStickyRemovalComment) {
         await postStickyRemovalNotice(context, post.id, reason);
       }
@@ -208,7 +321,7 @@ Devvit.addTrigger({
       if (context.reddit) {
         try {
           const targetPostId = post.id.startsWith('t3_') ? post.id : `t3_${post.id}`;
-          const isSpam = filterResult.action === 'spam';
+          const isSpam = effectiveAction === 'spam';
           await context.reddit.remove(targetPostId, isSpam);
         } catch (err) {
           console.error(`[TurboMod] Error removing filtered post ${post.id}:`, err);
@@ -217,7 +330,7 @@ Devvit.addTrigger({
 
       if (context.redis) {
         await addModLogEntry(context.redis, {
-          action: filterResult.action === 'spam' ? 'SPAM_FILTERED' : 'POST_REMOVED',
+          action: effectiveAction === 'spam' ? 'SPAM_FILTERED' : 'POST_REMOVED',
           targetId: post.id,
           author: username,
           reason,

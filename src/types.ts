@@ -10,11 +10,15 @@ export interface ModerationRuleConfig {
   rateLimitMaxPosts: number;
   rateLimitWindowSeconds: number;
   enableStickyRemovalComment?: boolean;
+  testMode?: boolean;
+  actionOnSpam?: 'remove' | 'report' | 'spam';
+  exemptUsernames?: string[];
+  exemptFlairs?: string[];
 }
 
 export interface ModLogEntry {
   id: string;
-  action: 'POST_REMOVED' | 'THREAD_NUKED' | 'RATE_LIMIT_EXCEEDED' | 'SPAM_FILTERED';
+  action: 'POST_REMOVED' | 'THREAD_NUKED' | 'RATE_LIMIT_EXCEEDED' | 'SPAM_FILTERED' | 'TEST_MODE_LOGGED' | 'POST_REPORTED';
   targetId: string;
   author: string;
   moderator?: string;

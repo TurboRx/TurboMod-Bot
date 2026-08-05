@@ -12,6 +12,10 @@ export const DEFAULT_CONFIG: ModerationRuleConfig = {
   rateLimitMaxPosts: 2,
   rateLimitWindowSeconds: 10800,
   enableStickyRemovalComment: true,
+  testMode: false,
+  actionOnSpam: 'remove',
+  exemptUsernames: [],
+  exemptFlairs: ['verified', 'proof', 'approved'],
 };
 
 function normalizeText(text?: string): string {
