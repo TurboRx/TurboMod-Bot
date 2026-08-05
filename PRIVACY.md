@@ -16,10 +16,15 @@ To perform automated moderation, TurboMod-Bot processes the following Reddit sub
 - **No External Data Selling:** TurboMod-Bot does not sell, monetize, or track user data across subreddits.
 
 ## 3. Third-Party AI Services
-If the subreddit moderation team enables AI-assisted filtering by supplying an API key (e.g., OpenAI, Google Gemini, Anthropic Claude, or custom proxy):
+If the subreddit moderation team enables AI-assisted filtering by supplying an API key (e.g., OpenAI, Google Gemini, Anthropic Claude, Grok, DeepSeek, or custom proxy):
 - Submission content (titles and post bodies) is sent via HTTPS to the designated AI provider endpoint solely for moderation scoring and evaluation.
 - No personal user identifiers beyond submission content are included in AI evaluation requests.
-- Data processing by AI providers is subject to the respective provider's privacy policy and API data privacy terms.
+- Data processing by AI providers is governed by their respective official privacy policies:
+  - **OpenAI:** [https://openai.com/privacy/](https://openai.com/privacy/)
+  - **Google Gemini:** [https://policies.google.com/privacy](https://policies.google.com/privacy)
+  - **Anthropic Claude:** [https://www.anthropic.com/privacy](https://www.anthropic.com/privacy)
+  - **xAI / Grok:** [https://x.ai/privacy](https://x.ai/privacy)
+  - **DeepSeek:** [https://www.deepseek.com/privacy](https://www.deepseek.com/privacy)
 
 ## 4. Data Security
 All communications between TurboMod-Bot, Reddit, Redis, and third-party APIs occur exclusively over encrypted HTTPS connections.
