@@ -108,7 +108,7 @@ Devvit.addSettings([
   {
     type: 'string',
     name: 'aiModelName',
-    label: 'AI Model Name / ID (Any model ID, e.g. gemini-2.0-flash, gpt-4o, claude-3-5-sonnet, deepseek-chat, grok-2)',
+    label: 'AI Model Name / ID (Optional model ID override for your selected AI provider)',
     defaultValue: '',
   },
   {

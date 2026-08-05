@@ -10,7 +10,7 @@
 
 ## ✨ Key Features
 
-- 🤖 **Multi-Provider AI Semantic Spam Filter**: Option to enable AI-powered classification for borderline spam/scams supporting **Google Gemini**, **OpenAI**, **Anthropic Claude**, **DeepSeek**, **xAI Grok**, or any **Custom OpenAI-Compatible API** (e.g. OpenRouter, Ollama, vLLM).
+- 🤖 **Multi-Provider AI Semantic Spam Filter**: Option to enable AI-powered classification for borderline spam/scams supporting **Google Gemini**, **OpenAI**, **Anthropic Claude**, **DeepSeek**, **xAI Grok**, or any **Custom OpenAI-Compatible API** (e.g. OpenRouter, Ollama, vLLM). Supports any current or future model ID.
 - 🛡️ **Real-Time Posts & Comments Moderation**: Monitors both submission posts AND comments in real-time for suspicious link shorteners (`bit.ly`, `tinyurl`, `linktr.ee`, `beacons.ai`, `qr.co`), zero-width space/soft-hyphen evasion tricks, dot obfuscations (`bit[.]ly`), and common spam/scam patterns.
 - 🕵️ **Anti-Stealth Edit Protection**: Evaluates content edits (`PostUpdate` & `CommentUpdate`) to prevent spammers from posting clean text and later editing in malicious links.
 - 🔒 **Automatic Content Locking**: Automatically locks removed posts and comments to prevent continued spam engagement.
@@ -44,7 +44,7 @@ Once installed, moderators can customize all thresholds directly in **Subreddit 
 | **Action on Spam** | `Remove` | Select action (`Remove`, `Filter to Mod Queue`, `Report to Mods`, `Mark as Spam`). |
 | **AI Provider** | `Disabled` | Choose AI Provider (`Gemini`, `OpenAI`, `Claude`, `DeepSeek`, `Grok`, `Custom`). |
 | **AI API Key** | `(Secret)` | Secret API key for the selected AI Provider. |
-| **AI Model Name** | `(Default)` | Model override (e.g. `gemini-1.5-flash`, `gpt-4o-mini`, `claude-3-5-haiku-20241022`). |
+| **AI Model Name** | `(Default)` | Optional model ID override (enter any model ID supported by your provider). |
 | **AI Sensitivity** | `Medium` | AI Confidence Threshold (`Medium` 75%+, `High` 90%+, `Low` 60%+). |
 | **Exempt Usernames** | `(Empty)` | Comma-separated list of usernames to bypass checks. |
 | **Exempt User Flairs** | `verified, proof, approved` | User flair keywords that grant exemption. |
@@ -53,14 +53,14 @@ Once installed, moderators can customize all thresholds directly in **Subreddit 
 
 ## 🤖 Supported AI Providers
 
-When **AI Semantic Spam Filter** is enabled, TurboMod evaluates borderline content with LLM intelligence:
+When **AI Semantic Spam Filter** is enabled, TurboMod evaluates borderline content with LLM intelligence across all major providers:
 
-- 🟢 **Google Gemini**: Uses Google's ultra-fast `gemini-1.5-flash` / `gemini-2.0-flash` models.
-- 🟢 **OpenAI**: Uses `gpt-4o-mini` or `gpt-4o`.
-- 🟢 **Anthropic Claude**: Uses `claude-3-5-haiku-20241022` or `claude-3-5-sonnet-20241022`.
-- 🟢 **DeepSeek**: Uses DeepSeek V3 (`deepseek-chat`) or R1 models.
-- 🟢 **xAI Grok**: Uses xAI `grok-beta`.
-- 🟢 **Custom OpenAI-Compatible Endpoint**: Connect any custom endpoint (OpenRouter, Ollama, vLLM, LocalAI) by providing your custom Base URL!
+- 🟢 **Google Gemini**: Connect your Gemini API key and specify any Gemini model ID.
+- 🟢 **OpenAI**: Connect your OpenAI API key and specify any OpenAI model ID.
+- 🟢 **Anthropic Claude**: Connect your Anthropic API key and specify any Claude model ID.
+- 🟢 **DeepSeek**: Connect your DeepSeek API key and specify any DeepSeek model ID.
+- 🟢 **xAI Grok**: Connect your xAI API key and specify any Grok model ID.
+- 🟢 **Custom OpenAI-Compatible Endpoint**: Connect any custom API endpoint (OpenRouter, Ollama, vLLM, LocalAI) by providing your custom Base URL and model ID!
 
 ---
 
