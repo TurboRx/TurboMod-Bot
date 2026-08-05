@@ -1,11 +1,13 @@
 import { Devvit } from '@devvit/public-api';
 import { evaluatePost, DEFAULT_CONFIG } from './filters.js';
+import { evaluateContentWithAI } from './aiFilter.js';
 import { checkAndIncrementRateLimit, addModLogEntry, getModLogs, isModeratorCached } from './redis.js';
-import { ModerationRuleConfig } from './types.js';
+import { ModerationRuleConfig, AIProvider, AISensitivity } from './types.js';
 
 Devvit.configure({
   redditAPI: true,
   redis: true,
+  http: true,
 });
 
 Devvit.addSettings([
@@ -82,6 +84,51 @@ Devvit.addSettings([
     defaultValue: ['remove'],
   },
   {
+    type: 'select',
+    name: 'aiProvider',
+    label: 'AI Provider for Semantic Spam Filter',
+    options: [
+      { label: 'Disabled (Default)', value: 'none' },
+      { label: 'Google Gemini', value: 'gemini' },
+      { label: 'OpenAI', value: 'openai' },
+      { label: 'Anthropic Claude', value: 'claude' },
+      { label: 'DeepSeek', value: 'deepseek' },
+      { label: 'xAI Grok', value: 'grok' },
+      { label: 'Custom OpenAI-Compatible API (OpenRouter, Ollama, LocalAI, etc.)', value: 'custom' },
+    ],
+    defaultValue: ['none'],
+  },
+  {
+    type: 'string',
+    name: 'aiApiKey',
+    label: 'AI API Key (Secret Key for selected AI Provider)',
+    scope: 'app',
+    isSecret: true,
+  },
+  {
+    type: 'string',
+    name: 'aiModelName',
+    label: 'AI Model Name / ID (Any model ID, e.g. gemini-2.0-flash, gpt-4o, claude-3-5-sonnet, deepseek-chat, grok-2)',
+    defaultValue: '',
+  },
+  {
+    type: 'string',
+    name: 'aiCustomEndpoint',
+    label: 'AI Custom Endpoint Base URL (Required for Custom Provider, e.g. https://openrouter.ai/api/v1)',
+    defaultValue: '',
+  },
+  {
+    type: 'select',
+    name: 'aiSensitivity',
+    label: 'AI Spam Filter Sensitivity',
+    options: [
+      { label: 'Medium Confidence (75%+ Threshold - Recommended)', value: 'medium' },
+      { label: 'High Confidence (90%+ Threshold - Strict)', value: 'low' },
+      { label: 'Low Confidence (60%+ Threshold - Aggressive)', value: 'high' },
+    ],
+    defaultValue: ['medium'],
+  },
+  {
     type: 'string',
     name: 'exemptUsernames',
     label: 'Exempt Usernames (comma-separated list)',
@@ -124,6 +171,14 @@ async function getEffectiveConfig(context: any): Promise<ModerationRuleConfig> {
       | 'report'
       | 'spam';
 
+    const rawAiProvider = Array.isArray(settings.aiProvider) ? settings.aiProvider[0] : settings.aiProvider;
+    const aiProvider = (['none', 'openai', 'gemini', 'claude', 'deepseek', 'grok', 'custom'].includes(rawAiProvider)
+      ? rawAiProvider
+      : 'none') as AIProvider;
+
+    const rawAiSensitivity = Array.isArray(settings.aiSensitivity) ? settings.aiSensitivity[0] : settings.aiSensitivity;
+    const aiSensitivity = (['low', 'medium', 'high'].includes(rawAiSensitivity) ? rawAiSensitivity : 'medium') as AISensitivity;
+
     return {
       minKarma: !isNaN(minKarma) ? minKarma : DEFAULT_CONFIG.minKarma,
       minAccountAgeDays: !isNaN(minAccountAgeDays) ? minAccountAgeDays : DEFAULT_CONFIG.minAccountAgeDays,
@@ -136,6 +191,11 @@ async function getEffectiveConfig(context: any): Promise<ModerationRuleConfig> {
       checkEdits: Boolean(settings.checkEdits ?? true),
       testMode: Boolean(settings.testMode ?? false),
       actionOnSpam,
+      aiProvider,
+      aiApiKey: typeof settings.aiApiKey === 'string' ? settings.aiApiKey : '',
+      aiModelName: typeof settings.aiModelName === 'string' ? settings.aiModelName : '',
+      aiCustomEndpoint: typeof settings.aiCustomEndpoint === 'string' ? settings.aiCustomEndpoint : '',
+      aiSensitivity,
       exemptUsernames,
       exemptFlairs,
     };
@@ -344,7 +404,24 @@ async function processContent(options: ProcessContentOptions, context: any): Pro
     }
   }
 
-  const filterResult = evaluatePost(title, body, authorKarma, authorCreatedUtc, config);
+  let filterResult = evaluatePost(title, body, authorKarma, authorCreatedUtc, config);
+
+  // If static filters pass, evaluate with multi-provider AI semantic filter if enabled
+  if (filterResult.passed && config.aiProvider && config.aiProvider !== 'none' && config.aiApiKey) {
+    try {
+      const aiResult = await evaluateContentWithAI(title, body, config);
+      if (aiResult && aiResult.isSpam) {
+        filterResult = {
+          passed: false,
+          reason: `[AI Spam Detection - ${aiResult.provider}] ${aiResult.reason} (${Math.round(aiResult.confidence * 100)}% confidence)`,
+          action: 'spam',
+          isAiResult: true,
+        };
+      }
+    } catch (aiErr) {
+      console.error('[TurboMod] AI evaluation failed:', aiErr);
+    }
+  }
 
   if (!filterResult.passed) {
     const reason = filterResult.reason || 'Failed content/author moderation filters';
@@ -431,12 +508,13 @@ async function processContent(options: ProcessContentOptions, context: any): Pro
     }
 
     if (context.redis) {
-      const actionType =
-        effectiveAction === 'spam'
-          ? 'SPAM_FILTERED'
-          : itemType === 'post'
-          ? 'POST_REMOVED'
-          : 'COMMENT_REMOVED';
+      const actionType = filterResult.isAiResult
+        ? 'AI_SPAM_FILTERED'
+        : effectiveAction === 'spam'
+        ? 'SPAM_FILTERED'
+        : itemType === 'post'
+        ? 'POST_REMOVED'
+        : 'COMMENT_REMOVED';
 
       await addModLogEntry(context.redis, {
         action: actionType,

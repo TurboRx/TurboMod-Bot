@@ -1,7 +1,11 @@
+export type AIProvider = 'none' | 'openai' | 'gemini' | 'claude' | 'deepseek' | 'grok' | 'custom';
+export type AISensitivity = 'low' | 'medium' | 'high';
+
 export interface FilterResult {
   passed: boolean;
   reason?: string;
   action?: 'remove' | 'spam' | 'lock' | 'flag' | 'filter';
+  isAiResult?: boolean;
 }
 
 export interface ModerationRuleConfig {
@@ -18,6 +22,11 @@ export interface ModerationRuleConfig {
   actionOnSpam?: 'remove' | 'report' | 'spam' | 'filter';
   exemptUsernames?: string[];
   exemptFlairs?: string[];
+  aiProvider?: AIProvider;
+  aiApiKey?: string;
+  aiCustomEndpoint?: string;
+  aiModelName?: string;
+  aiSensitivity?: AISensitivity;
 }
 
 export interface ModLogEntry {
@@ -30,6 +39,7 @@ export interface ModLogEntry {
     | 'THREAD_NUKED'
     | 'RATE_LIMIT_EXCEEDED'
     | 'SPAM_FILTERED'
+    | 'AI_SPAM_FILTERED'
     | 'TEST_MODE_LOGGED'
     | 'POST_REPORTED'
     | 'COMMENT_REPORTED';
@@ -52,4 +62,11 @@ export interface NukeThreadResult {
   commentsRemoved: number;
   threadLocked: boolean;
   error?: string;
+}
+
+export interface AIEvaluationResult {
+  isSpam: boolean;
+  confidence: number;
+  reason: string;
+  provider: string;
 }
