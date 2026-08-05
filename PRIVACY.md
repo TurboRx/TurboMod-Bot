@@ -24,7 +24,7 @@ If the subreddit moderation team enables AI-assisted filtering by supplying an A
   - **Google Gemini:** [https://policies.google.com/privacy](https://policies.google.com/privacy)
   - **Anthropic Claude:** [https://www.anthropic.com/privacy](https://www.anthropic.com/privacy)
   - **xAI / Grok:** [https://x.ai/legal/privacy-policy](https://x.ai/legal/privacy-policy)
-  - **DeepSeek:** [https://www.deepseek.com](https://www.deepseek.com)
+  - **DeepSeek:** [https://cdn.deepseek.com/policies/en-US/deepseek-privacy-policy.html](https://cdn.deepseek.com/policies/en-US/deepseek-privacy-policy.html)
 
 ## 4. Data Security
 All communications between TurboMod-Bot, Reddit, Redis, and third-party APIs occur exclusively over encrypted HTTPS connections.
