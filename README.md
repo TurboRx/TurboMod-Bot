@@ -1,37 +1,59 @@
-# TurboMod
+# 🚀 TurboMod — High-Performance Subreddit Moderation
 
-[![Reddit App Directory](https://img.shields.io/badge/Reddit_App_Directory-TurboMod-FF4500?style=for-the-badge&logo=reddit&logoColor=white)](https://developers.reddit.com/apps/turbomod-bot)
-[![Category](https://img.shields.io/badge/Category-%23moderator-blue?style=for-the-badge)](#moderator)
+**TurboMod** is an all-in-one, real-time automated moderation app built for Reddit communities. It protects your subreddit from spam links, low-effort bot accounts, flood posting, and disruptive comment threads—all configurable in seconds directly from your subreddit's App Settings.
 
-**TurboMod** is a high-performance, automated moderation app for Reddit built on `@devvit/public-api`. Officially approved and available on the [Reddit App Directory](https://developers.reddit.com/apps/turbomod-bot).
+---
 
-## Key Features
+## ✨ Key Features
 
-- **Automated Real-Time Moderation**: Moderates submissions matching URL shortener patterns or spam keywords.
-- **Account Age & Karma Checks**: Enforces minimum account age and link/comment karma requirements.
-- **Atomic Redis Rate Limiting**: Restricts users to 2 posts per 3 hours (`turbomod:rate:{userId}`) using Redis sliding-window TTLs.
-- **Thread Nuke & Lock**: Moderator menu action to lock a post and purge comments in parallel.
-- **Sticky Removal Notices**: Posts automated stickied explanation comments on removed submissions.
-- **Subreddit Settings Panel**: Allows moderators to dynamically customize thresholds via Reddit App Settings.
-- **Redis Mod Logs**: Logs all automated and manual actions with a menu action to view recent logs.
+- 🛡️ **Real-Time Spam & Link Filtering**: Automatically detects and removes posts containing suspicious URL shorteners (`bit.ly`, `tinyurl`, `t.co`, etc.), zero-width space evasion tricks, and common spam/scam keywords.
+- 👤 **Account Age & Karma Verification**: Enforces minimum account age (in days) and combined link/comment karma to keep out brand-new burner accounts and spam bots.
+- ⚡ **Atomic Rate Limiting**: Prevents post flooding by enforcing customizable post limits per user within a rolling time window (powered by Redis).
+- 💬 **Automatic Sticky Removal Notices**: Leaves clear, stickied explanation comments on removed posts so users know why their post was filtered.
+- 🔨 **Moderator Thread Nuke & Lock**: A one-click moderator menu action to lock a chaotic submission and purge comment threads instantly.
+- 📊 **Subreddit Audit Logs**: Tracks all automated and manual moderation actions in a lightweight, accessible Redis log.
 
-## Tech Stack
+---
 
-- **Platform**: Reddit Devvit SDK (`@devvit/public-api ^0.13.10`)
-- **Language**: TypeScript (`^7.0.2`)
-- **Storage**: Redis Persistence (`context.redis`)
+## ⚙️ How to Configure
 
-## Structure
+Once installed, moderators can customize all thresholds directly in **Subreddit Settings ➔ App Settings ➔ TurboMod**:
 
-```
-├── devvit.yaml
-├── package.json
-├── tsconfig.json
-├── .github/
-│   └── dependabot.yml
-└── src/
-    ├── types.ts
-    ├── filters.ts
-    ├── redis.ts
-    └── main.ts
-```
+| Setting | Default | Description |
+| :--- | :---: | :--- |
+| **Minimum Required Karma** | `10` | Minimum combined karma required to post. |
+| **Minimum Account Age** | `3` days | Minimum account age in days required to post. |
+| **Rate Limit: Max Posts** | `2` | Maximum number of posts a user can submit per window. |
+| **Rate Limit Window** | `3` hours | Duration (in hours) for the rate limit sliding window. |
+| **Sticky Removal Comment** | `Enabled` | Post a stickied explanation comment on removed posts. |
+
+---
+
+## 🛠️ Moderator Actions & Commands
+
+TurboMod adds convenient moderation tools directly into your subreddit's context menus:
+
+### 1. 🔨 `TurboMod: Nuke & Lock Thread`
+- **Location**: Click `...` on any Post ➔ **TurboMod: Nuke & Lock Thread**
+- **Action**: Locks the submission and automatically purges comment threads in parallel.
+
+### 2. 📜 `TurboMod: View Recent Mod Logs`
+- **Location**: Click `...` on Subreddit Menu ➔ **TurboMod: View Recent Mod Logs**
+- **Action**: Displays a quick toast summary of the most recent automated removals and rate-limit triggers.
+
+---
+
+## ❓ Frequently Asked Questions (FAQ)
+
+**Q: Do moderators get filtered or rate-limited by TurboMod?**  
+*No! Subreddit moderators are automatically detected and bypass all age/karma checks and rate limits.*
+
+**Q: Can I disable sticky removal comments?**  
+*Yes! Toggle "Post Sticky Explanation Comment" off in your subreddit's TurboMod App Settings at any time.*
+
+---
+
+## 📬 Support & Source Code
+
+- **Reddit App Directory**: [developers.reddit.com/apps/turbomod-bot](https://developers.reddit.com/apps/turbomod-bot)
+- **Source Code & Issue Tracker**: [GitHub Repository](https://github.com/TurboRx/TurboMod-Bot)
