@@ -1,6 +1,9 @@
 # TurboMod
 
-**TurboMod** is a high-performance, automated moderation app for Reddit built on `@devvit/public-api`.
+[![Reddit App Directory](https://img.shields.io/badge/Reddit_App_Directory-TurboMod-FF4500?style=for-the-badge&logo=reddit&logoColor=white)](https://developers.reddit.com/apps/turbomod-bot)
+[![Category](https://img.shields.io/badge/Category-%23moderator-blue?style=for-the-badge)](#moderator)
+
+**TurboMod** is a high-performance, automated moderation app for Reddit built on `@devvit/public-api`. Officially approved and available on the [Reddit App Directory](https://developers.reddit.com/apps/turbomod-bot).
 
 ## Key Features
 
