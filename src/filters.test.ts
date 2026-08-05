@@ -7,23 +7,29 @@ import {
   DEFAULT_CONFIG,
 } from './filters.js';
 
-test('Spam Filter - URL Shorteners', () => {
+test('Spam Filter - URL Shorteners & Obfuscation Evasion', () => {
   const result1 = checkSpamPatterns('Check out this link: bit.ly/3xyz123', 'Some body content');
   assert.equal(result1.passed, false);
   assert.equal(result1.action, 'remove');
   assert.match(result1.reason || '', /URL shortener/i);
 
+  const resultLinktree = checkSpamPatterns('Check my bio linktr.ee/myprofile', 'Click here!');
+  assert.equal(resultLinktree.passed, false);
+
+  const resultBeacons = checkSpamPatterns('My social hub beacons.ai/myprofile', 'Click here!');
+  assert.equal(resultBeacons.passed, false);
+
   const result2 = checkSpamPatterns('Normal post title', 'Visit https://example.com/article');
   assert.equal(result2.passed, true);
 });
 
-test('Spam Filter - Spam Keywords', () => {
+test('Spam Filter - Spam Keywords & Soft Hyphens', () => {
   const result1 = checkSpamPatterns('Get FREE CRYPTO right now!', 'Telegram: @crypto_scam');
   assert.equal(result1.passed, false);
   assert.equal(result1.action, 'spam');
 
-  // Test zero-width space evasion
-  const resultEvade = checkSpamPatterns('Get F\u200BREE CRY\u200BPTO right now!', 'Telegram:\u200B@crypto_scam');
+  // Test zero-width space and soft-hyphen evasion
+  const resultEvade = checkSpamPatterns('Get F\u200BREE CRY\u00ADPTO right now!', 'Telegram:\u200B@crypto_scam');
   assert.equal(resultEvade.passed, false);
   assert.equal(resultEvade.action, 'spam');
 

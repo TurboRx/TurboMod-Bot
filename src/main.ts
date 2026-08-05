@@ -35,6 +35,30 @@ Devvit.addSettings([
   },
   {
     type: 'boolean',
+    name: 'checkComments',
+    label: 'Evaluate Comments for Spam & Link Shorteners',
+    defaultValue: true,
+  },
+  {
+    type: 'boolean',
+    name: 'checkEdits',
+    label: 'Evaluate Post & Comment Edits (Anti-Stealth Spam Edit)',
+    defaultValue: true,
+  },
+  {
+    type: 'boolean',
+    name: 'exemptApprovedUsers',
+    label: 'Exempt Approved Submitter Users from Automated Moderation',
+    defaultValue: true,
+  },
+  {
+    type: 'boolean',
+    name: 'lockContentOnRemoval',
+    label: 'Lock Content when Removed (Prevents further engagement)',
+    defaultValue: true,
+  },
+  {
+    type: 'boolean',
     name: 'enableStickyRemovalComment',
     label: 'Post Sticky Explanation Comment on Post Removal',
     defaultValue: true,
@@ -42,7 +66,7 @@ Devvit.addSettings([
   {
     type: 'boolean',
     name: 'testMode',
-    label: 'Test Mode (Dry Run - Log actions without removing/filtering posts)',
+    label: 'Test Mode (Dry Run - Log actions without removing/filtering content)',
     defaultValue: false,
   },
   {
@@ -50,8 +74,9 @@ Devvit.addSettings([
     name: 'actionOnSpam',
     label: 'Action on Spam / Filter Match',
     options: [
-      { label: 'Remove Post (Default)', value: 'remove' },
-      { label: 'Report Post to Subreddit Mods', value: 'report' },
+      { label: 'Remove Content (Default)', value: 'remove' },
+      { label: 'Filter to Subreddit Mod Queue', value: 'filter' },
+      { label: 'Report Content to Subreddit Mods', value: 'report' },
       { label: 'Mark as Spam', value: 'spam' },
     ],
     defaultValue: ['remove'],
@@ -93,7 +118,11 @@ async function getEffectiveConfig(context: any): Promise<ModerationRuleConfig> {
       .filter((s: string) => s.length > 0);
 
     const rawAction = Array.isArray(settings.actionOnSpam) ? settings.actionOnSpam[0] : settings.actionOnSpam;
-    const actionOnSpam = (['remove', 'report', 'spam'].includes(rawAction) ? rawAction : 'remove') as 'remove' | 'report' | 'spam';
+    const actionOnSpam = (['remove', 'filter', 'report', 'spam'].includes(rawAction) ? rawAction : 'remove') as
+      | 'remove'
+      | 'filter'
+      | 'report'
+      | 'spam';
 
     return {
       minKarma: !isNaN(minKarma) ? minKarma : DEFAULT_CONFIG.minKarma,
@@ -101,6 +130,10 @@ async function getEffectiveConfig(context: any): Promise<ModerationRuleConfig> {
       rateLimitMaxPosts: !isNaN(rateLimitMaxPosts) && rateLimitMaxPosts > 0 ? rateLimitMaxPosts : DEFAULT_CONFIG.rateLimitMaxPosts,
       rateLimitWindowSeconds: windowHours * 3600,
       enableStickyRemovalComment: Boolean(settings.enableStickyRemovalComment ?? true),
+      lockContentOnRemoval: Boolean(settings.lockContentOnRemoval ?? true),
+      exemptApprovedUsers: Boolean(settings.exemptApprovedUsers ?? true),
+      checkComments: Boolean(settings.checkComments ?? true),
+      checkEdits: Boolean(settings.checkEdits ?? true),
       testMode: Boolean(settings.testMode ?? false),
       actionOnSpam,
       exemptUsernames,
@@ -112,231 +145,409 @@ async function getEffectiveConfig(context: any): Promise<ModerationRuleConfig> {
   }
 }
 
-async function postStickyRemovalNotice(
-  context: any,
-  postId: string,
-  reason: string
-): Promise<void> {
-  if (!context.reddit) return;
-  const targetId = postId.startsWith('t3_') ? postId : `t3_${postId}`;
+async function isApprovedUser(context: any, subredditName: string, username: string): Promise<boolean> {
+  if (!context.reddit || !subredditName || !username) return false;
   try {
-    console.log(`[TurboMod] Adding sticky removal comment on post ${targetId}`);
+    const approvedUsers = await context.reddit.getApprovedUsers({ subredditName, username }).all();
+    return approvedUsers.some((u: any) => u.username.toLowerCase() === username.toLowerCase());
+  } catch (err) {
+    return false;
+  }
+}
+
+async function postStickyRemovalNotice(context: any, itemId: string, reason: string): Promise<void> {
+  if (!context.reddit || !itemId.startsWith('t3_')) return;
+  try {
+    console.log(`[TurboMod] Adding sticky removal comment on post ${itemId}`);
     const comment = await context.reddit.addComment({
-      id: targetId,
-      text: `🤖 **TurboMod Automated Moderation Notice**\n\nYour post has been automatically removed.\n\n**Reason:** ${reason}\n\n*If you believe this action was taken in error, please contact the subreddit moderation team.*`,
+      id: itemId,
+      text: `🤖 **TurboMod Automated Moderation Notice**\n\nYour submission has been automatically filtered.\n\n**Reason:** ${reason}\n\n*If you believe this action was taken in error, please contact the subreddit moderation team.*`,
     });
     if (comment) {
       await comment.distinguish(true);
       console.log(`[TurboMod] Sticky removal comment ${comment.id} posted successfully.`);
     }
   } catch (err) {
-    console.error(`[TurboMod] Failed to post sticky removal comment on ${targetId}:`, err);
+    console.error(`[TurboMod] Failed to post sticky removal comment on ${itemId}:`, err);
   }
 }
 
-Devvit.addTrigger({
-  event: 'PostSubmit',
-  onEvent: async (event, context) => {
-    const post = event.post;
-    const author = event.author;
-
-    if (!post || !author || !author.id) {
-      console.log('[TurboMod] Missing post or author metadata in PostSubmit event.');
-      return;
+async function lockItem(context: any, itemId: string): Promise<void> {
+  if (!context.reddit) return;
+  try {
+    if (itemId.startsWith('t3_')) {
+      const post = await context.reddit.getPostById(itemId);
+      if (post && !post.locked) await post.lock();
+    } else if (itemId.startsWith('t1_')) {
+      const comment = await context.reddit.getCommentById(itemId);
+      if (comment && !comment.locked) await comment.lock();
     }
+  } catch (err) {
+    console.error(`[TurboMod] Failed to lock content item ${itemId}:`, err);
+  }
+}
 
-    const username = author.name || 'unknown_user';
-    const userId = author.id;
-    const postTitle = post.title || '';
-    const postBody = post.selftext || '';
+interface ProcessContentOptions {
+  itemId: string;
+  itemType: 'post' | 'comment';
+  isEdit?: boolean;
+  title?: string;
+  body?: string;
+  author: {
+    id?: string;
+    name?: string;
+    karma?: number;
+    linkKarma?: number;
+    commentKarma?: number;
+    createdAt?: string | Date;
+  };
+  flairText?: string;
+}
 
-    console.log(`[TurboMod] Processing PostSubmit for post ${post.id} by ${username}`);
+async function processContent(options: ProcessContentOptions, context: any): Promise<void> {
+  const { itemId, itemType, isEdit, title, body, author, flairText } = options;
+  const username = author.name || 'unknown_user';
+  const userId = author.id || username;
 
-    if (context.subredditName && username !== 'unknown_user') {
-      try {
-        const isMod = context.redis
-          ? await isModeratorCached(context.redis, context.reddit, context.subredditName, username)
-          : false;
+  if (username === 'AutoModerator' || username === 'unknown_user' || username.endsWith('-ModTeam')) {
+    return;
+  }
 
-        if (isMod) {
-          console.log(`[TurboMod] User ${username} is a moderator. Bypassing rate limit and filters.`);
-          return;
-        }
-      } catch (err) {
-        console.error(`[TurboMod] Error checking moderator status for ${username}:`, err);
-      }
-    }
+  console.log(`[TurboMod] Processing ${itemType}${isEdit ? ' update' : ''} ${itemId} by u/${username}`);
 
-    const config = await getEffectiveConfig(context);
-
-    // Custom exempt username check
-    if (config.exemptUsernames && config.exemptUsernames.includes(username.toLowerCase())) {
-      console.log(`[TurboMod] User ${username} is in custom exempt list. Bypassing.`);
-      return;
-    }
-
-    // User flair exemption check
-    const flairText = ((post as any).authorFlair?.text || (post as any).authorFlairText || '').toLowerCase();
-    if (flairText && config.exemptFlairs && config.exemptFlairs.length > 0) {
-      if (config.exemptFlairs.some((f) => flairText.includes(f))) {
-        console.log(`[TurboMod] User ${username} has exempt flair "${flairText}". Bypassing moderation.`);
+  // Moderator exemption check
+  if (context.subredditName) {
+    try {
+      const isMod = context.redis
+        ? await isModeratorCached(context.redis, context.reddit, context.subredditName, username)
+        : false;
+      if (isMod) {
+        console.log(`[TurboMod] User u/${username} is a moderator. Bypassing automated moderation.`);
         return;
       }
+    } catch (err) {
+      console.error(`[TurboMod] Error checking moderator status for u/${username}:`, err);
     }
+  }
 
-    if (context.redis) {
-      const rateLimitResult = await checkAndIncrementRateLimit(
-        context.redis,
-        userId,
-        config.rateLimitMaxPosts,
-        config.rateLimitWindowSeconds
-      );
+  const config = await getEffectiveConfig(context);
 
-      if (!rateLimitResult.allowed) {
-        const reason = `Exceeded post rate limit (${rateLimitResult.currentCount}/${rateLimitResult.maxAllowed} posts in ${config.rateLimitWindowSeconds / 3600} hours)`;
-        console.warn(`[TurboMod] Rate limit exceeded for user ${username}: ${reason}`);
-
-        if (config.testMode) {
-          console.log(`[TurboMod] [TEST MODE] Rate limit triggered for ${username}, skipping removal.`);
-          await addModLogEntry(context.redis, {
-            action: 'TEST_MODE_LOGGED',
-            targetId: post.id,
-            author: username,
-            reason: `[TEST MODE] ${reason}`,
-          });
-          return;
-        }
-
-        if (config.enableStickyRemovalComment) {
-          await postStickyRemovalNotice(context, post.id, reason);
-        }
-
-        if (context.reddit) {
-          try {
-            const targetPostId = post.id.startsWith('t3_') ? post.id : `t3_${post.id}`;
-            await context.reddit.remove(targetPostId, false);
-          } catch (err) {
-            console.error(`[TurboMod] Error removing rate-limited post ${post.id}:`, err);
-          }
-        }
-
-        await addModLogEntry(context.redis, {
-          action: 'RATE_LIMIT_EXCEEDED',
-          targetId: post.id,
-          author: username,
-          reason,
-        });
-
-        return;
-      }
+  // Approved User / Contributor exemption check
+  if (config.exemptApprovedUsers && context.subredditName) {
+    const approved = await isApprovedUser(context, context.subredditName, username);
+    if (approved) {
+      console.log(`[TurboMod] User u/${username} is an approved submitter. Bypassing automated moderation.`);
+      return;
     }
+  }
 
-    let authorKarma = 0;
-    let authorCreatedUtc = Math.floor(Date.now() / 1000);
+  // Custom exempt username check
+  if (config.exemptUsernames && config.exemptUsernames.includes(username.toLowerCase())) {
+    console.log(`[TurboMod] User u/${username} is in custom exempt list. Bypassing.`);
+    return;
+  }
 
-    const authorObj = author as any;
-    if (typeof authorObj.karma === 'number') {
-      authorKarma = authorObj.karma;
-    } else if (typeof authorObj.linkKarma === 'number' || typeof authorObj.commentKarma === 'number') {
-      authorKarma = (authorObj.linkKarma || 0) + (authorObj.commentKarma || 0);
+  // User flair exemption check
+  const cleanFlair = (flairText || '').toLowerCase();
+  if (cleanFlair && config.exemptFlairs && config.exemptFlairs.length > 0) {
+    if (config.exemptFlairs.some((f) => cleanFlair.includes(f))) {
+      console.log(`[TurboMod] User u/${username} has exempt flair "${cleanFlair}". Bypassing.`);
+      return;
     }
+  }
 
-    if (authorObj.createdAt) {
-      const createdMs = new Date(authorObj.createdAt).getTime();
-      if (!isNaN(createdMs)) {
-        authorCreatedUtc = Math.floor(createdMs / 1000);
-      }
-    }
-
-    // Fetch full user profile if karma/createdAt is missing from event object
-    if (context.reddit && username && username !== 'unknown_user' && authorKarma === 0) {
-      try {
-        const fetchedUser = await context.reddit.getUserByUsername(username);
-        if (fetchedUser) {
-          authorKarma = (fetchedUser.linkKarma || 0) + (fetchedUser.commentKarma || 0);
-          if (fetchedUser.createdAt) {
-            authorCreatedUtc = Math.floor(new Date(fetchedUser.createdAt).getTime() / 1000);
-          }
-        }
-      } catch (err) {
-        console.error(`[TurboMod] Could not fetch user profile for ${username}:`, err);
-      }
-    }
-
-    const filterResult = evaluatePost(
-      postTitle,
-      postBody,
-      authorKarma,
-      authorCreatedUtc,
-      config
+  // Rate Limiting (Post Submit only)
+  if (itemType === 'post' && !isEdit && context.redis) {
+    const rateLimitResult = await checkAndIncrementRateLimit(
+      context.redis,
+      userId,
+      config.rateLimitMaxPosts,
+      config.rateLimitWindowSeconds
     );
 
-    if (!filterResult.passed) {
-      const reason = filterResult.reason || 'Failed content/author moderation filters';
-      console.warn(`[TurboMod] Post ${post.id} failed filter: ${reason}`);
+    if (!rateLimitResult.allowed) {
+      const reason = `Exceeded post rate limit (${rateLimitResult.currentCount}/${rateLimitResult.maxAllowed} posts in ${config.rateLimitWindowSeconds / 3600} hours)`;
+      console.warn(`[TurboMod] Rate limit exceeded for user u/${username}: ${reason}`);
 
       if (config.testMode) {
-        console.log(`[TurboMod] [TEST MODE] Post ${post.id} failed filter: ${reason}. Skipping removal.`);
-        if (context.redis) {
-          await addModLogEntry(context.redis, {
-            action: 'TEST_MODE_LOGGED',
-            targetId: post.id,
-            author: username,
-            reason: `[TEST MODE] ${reason}`,
-          });
-        }
-        return;
-      }
-
-      const effectiveAction = config.actionOnSpam || filterResult.action || 'remove';
-
-      if (effectiveAction === 'report') {
-        if (context.reddit) {
-          try {
-            const targetPostId = post.id.startsWith('t3_') ? post.id : `t3_${post.id}`;
-            const fetchedPost = await context.reddit.getPostById(targetPostId);
-            if (fetchedPost) {
-              await context.reddit.report(fetchedPost, { reason: `TurboMod: ${reason}` });
-            }
-          } catch (err) {
-            console.error(`[TurboMod] Error reporting post ${post.id}:`, err);
-          }
-        }
-
-        if (context.redis) {
-          await addModLogEntry(context.redis, {
-            action: 'POST_REPORTED',
-            targetId: post.id,
-            author: username,
-            reason,
-          });
-        }
+        console.log(`[TurboMod] [TEST MODE] Rate limit triggered for u/${username}, skipping removal.`);
+        await addModLogEntry(context.redis, {
+          action: 'TEST_MODE_LOGGED',
+          targetId: itemId,
+          author: username,
+          reason: `[TEST MODE] ${reason}`,
+        });
         return;
       }
 
       if (config.enableStickyRemovalComment) {
-        await postStickyRemovalNotice(context, post.id, reason);
+        await postStickyRemovalNotice(context, itemId, reason);
       }
 
       if (context.reddit) {
         try {
-          const targetPostId = post.id.startsWith('t3_') ? post.id : `t3_${post.id}`;
-          const isSpam = effectiveAction === 'spam';
-          await context.reddit.remove(targetPostId, isSpam);
+          await context.reddit.remove(itemId, false);
+          if (config.lockContentOnRemoval) {
+            await lockItem(context, itemId);
+          }
         } catch (err) {
-          console.error(`[TurboMod] Error removing filtered post ${post.id}:`, err);
+          console.error(`[TurboMod] Error removing rate-limited post ${itemId}:`, err);
+        }
+      }
+
+      await addModLogEntry(context.redis, {
+        action: 'RATE_LIMIT_EXCEEDED',
+        targetId: itemId,
+        author: username,
+        reason,
+      });
+
+      return;
+    }
+  }
+
+  // Author Karma & Age Evaluation
+  let authorKarma = 0;
+  let authorCreatedUtc = Math.floor(Date.now() / 1000);
+
+  if (typeof author.karma === 'number') {
+    authorKarma = author.karma;
+  } else if (typeof author.linkKarma === 'number' || typeof author.commentKarma === 'number') {
+    authorKarma = (author.linkKarma || 0) + (author.commentKarma || 0);
+  }
+
+  if (author.createdAt) {
+    const createdMs = new Date(author.createdAt).getTime();
+    if (!isNaN(createdMs)) {
+      authorCreatedUtc = Math.floor(createdMs / 1000);
+    }
+  }
+
+  if (context.reddit && username && username !== 'unknown_user' && authorKarma === 0) {
+    try {
+      const fetchedUser = await context.reddit.getUserByUsername(username);
+      if (fetchedUser) {
+        authorKarma = (fetchedUser.linkKarma || 0) + (fetchedUser.commentKarma || 0);
+        if (fetchedUser.createdAt) {
+          authorCreatedUtc = Math.floor(new Date(fetchedUser.createdAt).getTime() / 1000);
+        }
+      }
+    } catch (err) {
+      console.error(`[TurboMod] Could not fetch user profile for u/${username}:`, err);
+    }
+  }
+
+  const filterResult = evaluatePost(title, body, authorKarma, authorCreatedUtc, config);
+
+  if (!filterResult.passed) {
+    const reason = filterResult.reason || 'Failed content/author moderation filters';
+    console.warn(`[TurboMod] ${itemType} ${itemId} failed filter: ${reason}`);
+
+    if (config.testMode) {
+      console.log(`[TurboMod] [TEST MODE] ${itemType} ${itemId} failed filter: ${reason}. Skipping removal.`);
+      if (context.redis) {
+        await addModLogEntry(context.redis, {
+          action: 'TEST_MODE_LOGGED',
+          targetId: itemId,
+          author: username,
+          reason: `[TEST MODE] ${reason}`,
+        });
+      }
+      return;
+    }
+
+    const effectiveAction = config.actionOnSpam || filterResult.action || 'remove';
+
+    if (effectiveAction === 'report') {
+      if (context.reddit) {
+        try {
+          if (itemId.startsWith('t3_')) {
+            const post = await context.reddit.getPostById(itemId);
+            if (post) await context.reddit.report(post, { reason: `TurboMod: ${reason}` });
+          } else if (itemId.startsWith('t1_')) {
+            const comment = await context.reddit.getCommentById(itemId);
+            if (comment) await context.reddit.report(comment, { reason: `TurboMod: ${reason}` });
+          }
+        } catch (err) {
+          console.error(`[TurboMod] Error reporting ${itemId}:`, err);
         }
       }
 
       if (context.redis) {
         await addModLogEntry(context.redis, {
-          action: effectiveAction === 'spam' ? 'SPAM_FILTERED' : 'POST_REMOVED',
-          targetId: post.id,
+          action: itemType === 'post' ? 'POST_REPORTED' : 'COMMENT_REPORTED',
+          targetId: itemId,
           author: username,
           reason,
         });
       }
+      return;
     }
+
+    if (effectiveAction === 'filter') {
+      if (context.reddit) {
+        try {
+          // Remove without marking as spam so it appears in modqueue for review
+          await context.reddit.remove(itemId, false);
+          if (config.lockContentOnRemoval) {
+            await lockItem(context, itemId);
+          }
+        } catch (err) {
+          console.error(`[TurboMod] Error filtering ${itemId} to modqueue:`, err);
+        }
+      }
+
+      if (context.redis) {
+        await addModLogEntry(context.redis, {
+          action: itemType === 'post' ? 'POST_FILTERED' : 'COMMENT_FILTERED',
+          targetId: itemId,
+          author: username,
+          reason: `[Filtered to ModQueue] ${reason}`,
+        });
+      }
+      return;
+    }
+
+    if (config.enableStickyRemovalComment && itemType === 'post') {
+      await postStickyRemovalNotice(context, itemId, reason);
+    }
+
+    if (context.reddit) {
+      try {
+        const isSpam = effectiveAction === 'spam';
+        await context.reddit.remove(itemId, isSpam);
+        if (config.lockContentOnRemoval) {
+          await lockItem(context, itemId);
+        }
+      } catch (err) {
+        console.error(`[TurboMod] Error removing ${itemId}:`, err);
+      }
+    }
+
+    if (context.redis) {
+      const actionType =
+        effectiveAction === 'spam'
+          ? 'SPAM_FILTERED'
+          : itemType === 'post'
+          ? 'POST_REMOVED'
+          : 'COMMENT_REMOVED';
+
+      await addModLogEntry(context.redis, {
+        action: actionType,
+        targetId: itemId,
+        author: username,
+        reason,
+      });
+    }
+  }
+}
+
+// 1. PostSubmit Trigger
+Devvit.addTrigger({
+  event: 'PostSubmit',
+  onEvent: async (event, context) => {
+    const post = event.post;
+    const author = event.author;
+    if (!post || !author) return;
+
+    const targetPostId = post.id.startsWith('t3_') ? post.id : `t3_${post.id}`;
+    const flairText = (post as any).authorFlair?.text || (post as any).authorFlairText || '';
+
+    await processContent(
+      {
+        itemId: targetPostId,
+        itemType: 'post',
+        title: post.title || '',
+        body: post.selftext || '',
+        author,
+        flairText,
+      },
+      context
+    );
+  },
+});
+
+// 2. PostUpdate Trigger (Anti-Stealth Spam Edit)
+Devvit.addTrigger({
+  event: 'PostUpdate',
+  onEvent: async (event, context) => {
+    const config = await getEffectiveConfig(context);
+    if (!config.checkEdits) return;
+
+    const post = event.post;
+    const author = event.author;
+    if (!post || !author) return;
+
+    const targetPostId = post.id.startsWith('t3_') ? post.id : `t3_${post.id}`;
+    const flairText = (post as any).authorFlair?.text || (post as any).authorFlairText || '';
+
+    await processContent(
+      {
+        itemId: targetPostId,
+        itemType: 'post',
+        isEdit: true,
+        title: post.title || '',
+        body: post.selftext || '',
+        author,
+        flairText,
+      },
+      context
+    );
+  },
+});
+
+// 3. CommentSubmit Trigger
+Devvit.addTrigger({
+  event: 'CommentSubmit',
+  onEvent: async (event, context) => {
+    const config = await getEffectiveConfig(context);
+    if (!config.checkComments) return;
+
+    const comment = event.comment;
+    const author = event.author;
+    if (!comment || !author) return;
+
+    const targetCommentId = comment.id.startsWith('t1_') ? comment.id : `t1_${comment.id}`;
+    const flairText = (comment as any).authorFlair?.text || (comment as any).authorFlairText || '';
+
+    await processContent(
+      {
+        itemId: targetCommentId,
+        itemType: 'comment',
+        body: comment.body || '',
+        author,
+        flairText,
+      },
+      context
+    );
+  },
+});
+
+// 4. CommentUpdate Trigger (Anti-Stealth Spam Edit)
+Devvit.addTrigger({
+  event: 'CommentUpdate',
+  onEvent: async (event, context) => {
+    const config = await getEffectiveConfig(context);
+    if (!config.checkComments || !config.checkEdits) return;
+
+    const comment = event.comment;
+    const author = event.author;
+    if (!comment || !author) return;
+
+    const targetCommentId = comment.id.startsWith('t1_') ? comment.id : `t1_${comment.id}`;
+    const flairText = (comment as any).authorFlair?.text || (comment as any).authorFlairText || '';
+
+    await processContent(
+      {
+        itemId: targetCommentId,
+        itemType: 'comment',
+        isEdit: true,
+        body: comment.body || '',
+        author,
+        flairText,
+      },
+      context
+    );
   },
 });
 
@@ -389,7 +600,7 @@ Devvit.addMenuItem({
           targetId: postId,
           author: post.authorName || 'unknown',
           moderator: moderatorName,
-          reason: `Moderator ${moderatorName} nuked ${commentsRemoved} comment(s) and locked thread.`,
+          reason: `Moderator u/${moderatorName} nuked ${commentsRemoved} comment(s) and locked thread.`,
         });
       }
 
