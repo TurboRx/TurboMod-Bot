@@ -122,9 +122,9 @@ Devvit.addSettings([
     name: 'aiSensitivity',
     label: 'AI Spam Filter Sensitivity',
     options: [
-      { label: 'Medium Confidence (75%+ Threshold - Recommended)', value: 'medium' },
-      { label: 'High Confidence (90%+ Threshold - Strict)', value: 'low' },
-      { label: 'Low Confidence (60%+ Threshold - Aggressive)', value: 'high' },
+      { label: 'Medium Sensitivity (75%+ Confidence - Recommended)', value: 'medium' },
+      { label: 'High Sensitivity (60%+ Confidence - Aggressive Filter)', value: 'high' },
+      { label: 'Low Sensitivity (90%+ Confidence - Strict Filter)', value: 'low' },
     ],
     defaultValue: ['medium'],
   },
@@ -390,7 +390,8 @@ async function processContent(options: ProcessContentOptions, context: any): Pro
     }
   }
 
-  if (context.reddit && username && username !== 'unknown_user' && authorKarma === 0) {
+  const hasMissingCreatedDate = !author.createdAt || isNaN(new Date(author.createdAt).getTime());
+  if (context.reddit && username && username !== 'unknown_user' && (authorKarma === 0 || hasMissingCreatedDate)) {
     try {
       const fetchedUser = await context.reddit.getUserByUsername(username);
       if (fetchedUser) {
@@ -662,20 +663,24 @@ Devvit.addMenuItem({
 
       let commentsRemoved = 0;
       try {
-        const comments = await post.comments.all();
-        const CHUNK_SIZE = 15;
-        for (let i = 0; i < comments.length; i += CHUNK_SIZE) {
-          const chunk = comments.slice(i, i + CHUNK_SIZE);
-          await Promise.all(
-            chunk.map(async (comment) => {
-              try {
-                await comment.remove();
-                commentsRemoved++;
-              } catch (err) {
-                console.error(`[TurboMod] Failed to remove comment ${comment.id}:`, err);
-              }
-            })
-          );
+        if (post.comments) {
+          const comments = await post.comments.all();
+          const MAX_PURGE_LIMIT = 150;
+          const targetComments = (comments || []).slice(0, MAX_PURGE_LIMIT);
+          const CHUNK_SIZE = 20;
+          for (let i = 0; i < targetComments.length; i += CHUNK_SIZE) {
+            const chunk = targetComments.slice(i, i + CHUNK_SIZE);
+            await Promise.all(
+              chunk.map(async (comment) => {
+                try {
+                  await comment.remove();
+                  commentsRemoved++;
+                } catch (err) {
+                  console.error(`[TurboMod] Failed to remove comment ${comment.id}:`, err);
+                }
+              })
+            );
+          }
         }
       } catch (commentErr) {
         console.error('[TurboMod] Error fetching or purging comments:', commentErr);

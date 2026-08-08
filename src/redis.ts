@@ -14,9 +14,18 @@ export async function checkAndIncrementRateLimit(
   maxPosts: number = DEFAULT_MAX_POSTS,
   windowSeconds: number = DEFAULT_WINDOW_SECONDS
 ): Promise<RateLimitCheckResult> {
-  const cleanUserId = (userId || 'unknown').trim().toLowerCase().replace(/^u\//i, '');
+  const cleanUserId = (userId || '').trim().toLowerCase().replace(/^u\//i, '');
   const safeMaxPosts = isNaN(maxPosts) || maxPosts <= 0 ? DEFAULT_MAX_POSTS : maxPosts;
   const safeWindowSeconds = isNaN(windowSeconds) || windowSeconds <= 0 ? DEFAULT_WINDOW_SECONDS : windowSeconds;
+
+  if (!cleanUserId || cleanUserId === 'unknown' || cleanUserId === 'unknown_user') {
+    return {
+      allowed: true,
+      currentCount: 0,
+      maxAllowed: safeMaxPosts,
+      ttlRemainingSeconds: safeWindowSeconds,
+    };
+  }
 
   const key = `${RATE_LIMIT_PREFIX}${cleanUserId}`;
   const currentCount = await redis.incrBy(key, 1);

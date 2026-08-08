@@ -45,9 +45,10 @@ export function parseJsonResponse(rawText: string): { isSpam: boolean; confidenc
     }
 
     const parsed = JSON.parse(cleaned);
-    if (typeof parsed.isSpam === 'boolean') {
+    if (typeof parsed.isSpam === 'boolean' || typeof parsed.isSpam === 'string') {
+      const isSpam = typeof parsed.isSpam === 'boolean' ? parsed.isSpam : String(parsed.isSpam).toLowerCase() === 'true';
       return {
-        isSpam: Boolean(parsed.isSpam),
+        isSpam,
         confidence: typeof parsed.confidence === 'number' ? Math.min(1, Math.max(0, parsed.confidence)) : 0.8,
         reason: typeof parsed.reason === 'string' ? parsed.reason.trim() : 'Flagged by AI semantic filter',
       };
@@ -102,6 +103,12 @@ async function callOpenAICompatible(
     if (response.ok) {
       const data: any = await response.json();
       return data?.choices?.[0]?.message?.content || null;
+    }
+
+    if (response.status !== 400) {
+      const errorText = await response.text();
+      console.error(`[TurboMod AI] OpenAI-compatible endpoint returned HTTP ${response.status}: ${errorText}`);
+      return null;
     }
   } catch (_err) {
     // Fallback below

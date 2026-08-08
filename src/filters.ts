@@ -30,8 +30,9 @@ export function normalizeText(text?: string): string {
   // 2. De-obfuscate common dot obfuscations used in link shorteners (e.g., bit[.]ly, bit(dot)ly -> bit.ly)
   clean = clean.replace(/\[\.\]|\(\.\)|\{.\}|\(dot\)|\[dot\]|\{dot\}|\s+dot\s+/gi, '.');
 
-  // 3. De-obfuscate spaces inside domain names (e.g. "b i t . l y" -> "bit.ly")
-  clean = clean.replace(/(?:([a-z0-9])\s+([a-z0-9]))/gi, '$1$2');
+  // 3. De-obfuscate domain-specific spaces around dots (e.g. "b i t . l y" -> "bit.ly")
+  clean = clean.replace(/([a-z0-9])\s*\.\s*([a-z0-9])/gi, '$1.$2');
+  clean = clean.replace(/\b(?:[a-z0-9]\s+)+[a-z0-9]\.(?:[a-z0-9]\s*)+\b/gi, (m) => m.replace(/\s+/g, ''));
 
   return clean;
 }

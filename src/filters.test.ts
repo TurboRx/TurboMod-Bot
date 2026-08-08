@@ -49,6 +49,13 @@ test('Text Normalization Utility', () => {
   const input = 'bit[.]ly/3xyz\u200B123';
   const clean = normalizeText(input);
   assert.equal(clean, 'bit.ly/3xyz123');
+
+  // Verify normal English sentences preserve spaces
+  const sentence = 'Hello world this is a test post';
+  assert.equal(normalizeText(sentence), 'Hello world this is a test post');
+
+  // Verify spaced link shorteners are de-obfuscated
+  assert.equal(normalizeText('Check my bio b i t . l y/3xyz123'), 'Check my bio bit.ly/3xyz123');
 });
 
 test('Account Eligibility - Karma, Negative Karma & Age Checks', () => {
